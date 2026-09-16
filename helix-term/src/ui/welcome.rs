@@ -38,19 +38,6 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
 
 const WIDTH: u16 = 52;
 
-/// The name, as the wordmark draws it: the letters, and the cursor after them.
-const LOGO: [(&str, &str); 6] = [
-    ("                   ██", ""),
-    ("        ▀▀         ██", ""),
-    ("▄█▀▀▀▀  ██    ▄█▀▀▀██", ""),
-    ("▀█▄▄▄   ██    ██   ██", ""),
-    ("    ██  ██    ██   ██", ""),
-    ("▀▀▀▀▀   ▀▀     ▀▀▀▀▀▀", "▀▀▀▀▀▀"),
-];
-const LOGO_WIDTH: u16 = 21;
-
-const TAGLINE: &str = "A terminal code editor you already know how to use";
-
 #[derive(Default)]
 pub struct Welcome {
     /// Where each line was drawn and what it runs, for a click to land on.
@@ -96,13 +83,10 @@ impl Welcome {
             Some(color) => text.fg(color),
             None => text,
         };
-        // The name in the brightest text, and its cursor in the theme's blue: `info` is the
-        // accent itself in the themes sid ships, the blue of the logo.
+        // The name in the brightest text. No wordmark and no tagline: what opens on a blank
+        // editor is a heading, not a splash screen, so it says the name and the version and
+        // gets out of the way.
         let letters = theme.try_get("ui.text.focus").unwrap_or(text);
-        let accent = match theme.get("info").fg {
-            Some(color) => text.fg(color),
-            None => link,
-        };
         let bindings = keymaps
             .get(&editor.mode())
             .map(|keymap| crate::keymap::reachable(keymap.reverse_map(), editor.keyboard_enhanced))
@@ -115,9 +99,8 @@ impl Welcome {
             .map(|(_, items)| items.len() as u16 + 2)
             .sum::<u16>()
             + 1;
-        // The name drawn large where there is room for it and the menu, in a line where not.
-        let large = area.height >= LOGO.len() as u16 + 4 + menu && width >= LOGO_WIDTH + 8;
-        let head = if large { LOGO.len() as u16 + 4 } else { 2 };
+        // The name and the version on one line, and a blank after it.
+        let head = 2;
         let x = area.x + area.width.saturating_sub(width) / 2;
         let mut y = area.y + area.height.saturating_sub(head + menu) / 2;
         let bottom = area.bottom();
@@ -129,27 +112,10 @@ impl Welcome {
         };
 
         let version = helix_loader::VERSION_AND_GIT_HASH;
-        if large {
-            for (name, cursor) in LOGO {
-                line(&mut y, &mut |y| {
-                    surface.set_string(x, y, name, letters);
-                    surface.set_string(x + LOGO_WIDTH + 2, y, cursor, accent);
-                });
-            }
-            y += 1;
-            line(&mut y, &mut |y| {
-                surface.set_stringn(x, y, TAGLINE, width as usize, dim);
-            });
-            line(&mut y, &mut |y| {
-                surface.set_stringn(x, y, version, width as usize, dim);
-            });
-        } else {
-            line(&mut y, &mut |y| {
-                surface.set_string(x, y, "sid", letters.add_modifier(Modifier::BOLD));
-                surface.set_string(x + 3, y, "_", accent.add_modifier(Modifier::BOLD));
-                surface.set_stringn(x + 6, y, version, (width as usize).saturating_sub(6), dim);
-            });
-        }
+        line(&mut y, &mut |y| {
+            surface.set_string(x, y, "sid", letters.add_modifier(Modifier::BOLD));
+            surface.set_stringn(x + 4, y, version, (width as usize).saturating_sub(4), dim);
+        });
         y += 1;
 
         for (header, items) in SECTIONS {
