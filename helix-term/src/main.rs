@@ -26,7 +26,6 @@ fn main() -> Result<()> {
 async fn main_impl() -> Result<i32> {
     let args = Args::parse_args().context("could not parse arguments")?;
 
-    helix_loader::migrate_from_coil();
     helix_loader::initialize_config_file(args.config_file.clone());
     helix_loader::initialize_log_file(args.log_file.clone());
 
