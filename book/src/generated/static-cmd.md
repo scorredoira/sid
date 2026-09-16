@@ -108,25 +108,25 @@
 | `file_explorer_in_current_directory` | Open file explorer at current working directory |  |
 | `sidebar_focus` | Focus the sidebar, opening it if closed | normal: `` <space>T ``, select: `` <space>T `` |
 | `sidebar_toggle` | Show or hide the sidebar | normal: `` <space>t ``, select: `` <space>t `` |
-| `review_commits_toggle` | Show or hide the commits panel |  |
-| `review_code_toggle` | Show or hide the code panel while reviewing commits |  |
-| `review_context_toggle` | Toggle full file context in the current commit diff |  |
-| `review_side_by_side_toggle` | Show the current diff side by side, or one side above the other |  |
+| `review_commits_toggle` | Show or hide the git commits panel |  |
+| `review_code_toggle` | Show or hide the code panel while reviewing git commits |  |
+| `review_context_toggle` | Toggle full file context in the current git diff |  |
+| `review_side_by_side_toggle` | Show the current git diff side by side, or one side above the other |  |
 | `keyboard_shortcuts` | Show a searchable reference of keyboard shortcuts |  |
 | `sidebar_reveal` | Reveal the current file in the sidebar's tree, focused |  |
 | `markdown_preview_toggle` | Show or hide the Markdown preview beside the file |  |
 | `markdown_preview_full` | Show or hide the Markdown preview on its own, filling the screen |  |
 | `quit_saving` | Save every file that has one and quit, asking about what cannot be saved |  |
 | `settings` | Show the settings, and write what you change to config.toml |  |
-| `file_history` | Show the history of the current file in the sidebar | normal: `` <space>H ``, select: `` <space>H `` |
-| `blame_line` | Show who last changed the current line; again opens that commit | normal: `` <space>B ``, select: `` <space>B `` |
+| `file_history` | Show the git history of the current file in the sidebar | normal: `` <space>H ``, select: `` <space>H `` |
+| `blame_line` | Show who last changed the current line (git blame); again opens that commit | normal: `` <space>B ``, select: `` <space>B `` |
 | `code_action` | Perform code action | normal: `` <space>a ``, select: `` <space>a `` |
 | `buffer_picker` | Open buffer picker | normal: `` <space>b ``, select: `` <space>b `` |
 | `jumplist_picker` | Open jumplist picker | normal: `` <space>j ``, select: `` <space>j `` |
 | `symbol_picker` | Open symbol picker |  |
 | `syntax_symbol_picker` | Open symbol picker from syntax information |  |
 | `lsp_or_syntax_symbol_picker` | Open symbol picker from LSP or syntax information | normal: `` <space>s ``, select: `` <space>s `` |
-| `changed_file_picker` | Open changed file picker |  |
+| `changed_file_picker` | Open the picker of files git sees changed |  |
 | `select_references_to_symbol_under_cursor` | Select symbol references | normal: `` <space>h ``, select: `` <space>h `` |
 | `workspace_symbol_picker` | Open workspace symbol picker |  |
 | `syntax_workspace_symbol_picker` | Open workspace symbol picker from syntax information |  |
@@ -169,10 +169,10 @@
 | `goto_last_diag` | Goto last diagnostic | normal: `` ]D ``, select: `` ]D `` |
 | `goto_next_diag` | Goto next diagnostic | normal: `` ]d ``, select: `` ]d `` |
 | `goto_prev_diag` | Goto previous diagnostic | normal: `` [d ``, select: `` [d `` |
-| `goto_next_change` | Goto next change | normal: `` ]g ``, select: `` ]g `` |
-| `goto_prev_change` | Goto previous change | normal: `` [g ``, select: `` [g `` |
-| `goto_first_change` | Goto first change | normal: `` [G ``, select: `` [G `` |
-| `goto_last_change` | Goto last change | normal: `` ]G ``, select: `` ]G `` |
+| `goto_next_change` | Goto next git change | normal: `` ]g ``, select: `` ]g `` |
+| `goto_prev_change` | Goto previous git change | normal: `` [g ``, select: `` [g `` |
+| `goto_first_change` | Goto first git change | normal: `` [G ``, select: `` [G `` |
+| `goto_last_change` | Goto last git change | normal: `` ]G ``, select: `` ]G `` |
 | `goto_line_start` | Goto line start | normal: `` gh ``, `` <home> ``, select: `` gh ``, insert: `` <home> `` |
 | `goto_line_end` | Goto line end | normal: `` gl ``, `` <end> ``, select: `` gl `` |
 | `goto_column` | Goto column | normal: `` g\| `` |

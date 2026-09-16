@@ -237,6 +237,18 @@ impl<T, D> Column<T, D> {
         }
     }
 
+    /// A column that is searched but not shown: what the others say, put together, so
+    /// plain text typed in the query finds a row by any of them.
+    pub fn searched_only(name: impl Into<Arc<str>>, format: ColumnFormatFn<T, D>) -> Self {
+        Self {
+            name: name.into(),
+            truncate_start: true,
+            format,
+            filter: true,
+            hidden: true,
+        }
+    }
+
     pub fn without_filtering(mut self) -> Self {
         self.filter = false;
         self
@@ -569,9 +581,13 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             |_editor: &mut Context, _pattern: &str, _event: PromptEvent| {},
         );
 
+        // A hidden column takes no room.
         let widths = columns
             .iter()
-            .map(|column| Constraint::Length(column.name.chars().count() as u16))
+            .map(|column| match column.hidden {
+                true => Constraint::Length(0),
+                false => Constraint::Length(column.name.chars().count() as u16),
+            })
             .collect();
 
         let query = PickerQuery::new(columns.iter().map(|col| &col.name).cloned(), default_column);
@@ -1476,12 +1492,24 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             matcher.config.set_match_paths()
         }
 
+        // When what is typed searches a hidden column, the shown columns mark what it
+        // matched in their own text.
+        let primary = &self.columns[self.primary_column];
+        let searched = (primary.hidden && primary.filter).then(|| {
+            self.columns[..self.primary_column]
+                .iter()
+                .filter(|column| column.filter)
+                .count()
+        });
         let options = snapshot.matched_items(offset..end).map(|item| {
             let mut widths = self.widths.iter_mut();
             let mut matcher_index = 0;
 
             Row::new(self.columns.iter().map(|column| {
                 if column.hidden {
+                    if column.filter {
+                        matcher_index += 1;
+                    }
                     return Cell::default();
                 }
 
@@ -1490,7 +1518,14 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
                 };
                 let mut cell = column.format(item.data, &self.editor_data);
                 let width = if column.filter {
-                    snapshot.pattern().column_pattern(matcher_index).indices(
+                    let own = snapshot.pattern().column_pattern(matcher_index);
+                    let pattern = match searched {
+                        Some(searched) if own.atoms.is_empty() => {
+                            snapshot.pattern().column_pattern(searched)
+                        }
+                        _ => own,
+                    };
+                    pattern.indices(
                         item.matcher_columns[matcher_index].slice(..),
                         &mut matcher,
                         &mut indices,

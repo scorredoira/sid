@@ -280,7 +280,7 @@ So the keys are the ones you already know:
 | `Ctrl-n` / `Ctrl-w` / `Shift-F4` | A new buffer / close this one / close them all |
 | `Ctrl-s` / `Ctrl-Shift-s` | Save / save under a name |
 | `Ctrl-p` | Open a file by name |
-| `F1` / `Ctrl-Shift-p` | The command palette: every command, searchable, with its keys |
+| `F1` / `Ctrl-Shift-p` | The command palette: every command, searchable by name or by what it does (`diff`, `git`), with its keys |
 | `Shift-F1` | Searchable keyboard shortcut reference (including sidebar controls) |
 | `F4` | Commit diff: full file context / changed sections |
 | `Ctrl-Alt-d` | A diff side by side / one side above the other |
@@ -380,8 +380,8 @@ it touches, so the rest of the file, comments included, stays as you wrote it.
 
 ## Find a shortcut
 
-`F1` opens the command palette: every command, searchable, with the keys bound to
-it. `Shift-F1` opens a centered reference of the shortcuts over the editor. Type to
+`F1` opens the command palette: every command, searchable by its name or by what it
+does — `diff` or `git` find every git command — with the keys bound to it. `Shift-F1` opens a centered reference of the shortcuts over the editor. Type to
 search your configured shortcuts, use `Tab` to filter by mode or sidebar, and `Esc`
 to close it.
 
