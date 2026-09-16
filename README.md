@@ -171,6 +171,13 @@ or use `F6` / `F7` to show or hide commits / code.
 
 ![The history in the sidebar, the diff of the selected commit on the right](fork/screenshots/commits.png)
 
+`Ctrl-Alt-d` puts any diff, a commit's or an uncommitted file's, side by side:
+the old side on the left, the new one on the right, each line facing the line
+it became. Scroll or move either side and the other follows. `Ctrl-Alt-d`
+again puts one side above the other.
+
+![A commit's diff side by side](fork/screenshots/side-by-side.png)
+
 `Ctrl-Alt-l` narrows the history to the current file, following renames.
 
 ![The history of one file](fork/screenshots/history.png)
@@ -276,6 +283,7 @@ So the keys are the ones you already know:
 | `F1` / `Ctrl-Shift-p` | The command palette: every command, searchable, with its keys |
 | `Shift-F1` | Searchable keyboard shortcut reference (including sidebar controls) |
 | `F4` | Commit diff: full file context / changed sections |
+| `Ctrl-Alt-d` | A diff side by side / one side above the other |
 | `F6` / `F7` | Show or hide the commits / code panel |
 | `Ctrl-Alt-b` / `Ctrl-Alt-l` | Who changed this line / this file's history |
 | `Ctrl-f` / `F3` / `Shift-F3` | Search in this file / next match / previous |

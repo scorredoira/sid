@@ -304,6 +304,10 @@ mod tests {
                 "select_all_occurrences"
             );
             assert_eq!(command_at(&config, mode, &["F4"]), "review_context_toggle");
+            assert_eq!(
+                command_at(&config, mode, &["C-A-d"]),
+                "review_side_by_side_toggle"
+            );
             assert_eq!(command_at(&config, mode, &["F6"]), "review_commits_toggle");
             assert_eq!(command_at(&config, mode, &["F7"]), "review_code_toggle");
             assert_eq!(command_at(&config, mode, &["F9"]), "review_files_toggle");

@@ -321,6 +321,21 @@ impl Sidebar {
         self.diff.full_context()
     }
 
+    pub fn toggle_side_by_side(&mut self, editor: &mut Editor) {
+        self.focus_code();
+        self.diff.toggle_side_by_side(editor);
+    }
+
+    pub fn side_by_side(&self) -> bool {
+        self.diff.side_by_side()
+    }
+
+    /// Keeps the two sides of a diff shown side by side on the same rows; run before the
+    /// views are drawn, whether the sidebar is open or not.
+    pub fn follow_diff(&mut self, editor: &mut Editor) {
+        self.diff.follow(editor);
+    }
+
     pub fn toggle(&mut self, editor: &mut Editor) {
         self.open = !self.open;
         if self.open {

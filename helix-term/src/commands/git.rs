@@ -135,3 +135,10 @@ pub fn review_context_toggle(cx: &mut Context) {
         view.sidebar.toggle_context(cx.editor);
     }));
 }
+
+pub fn review_side_by_side_toggle(cx: &mut Context) {
+    cx.callback.push(Box::new(|compositor, cx| {
+        let view = compositor.find::<EditorView>().unwrap();
+        view.sidebar.toggle_side_by_side(cx.editor);
+    }));
+}

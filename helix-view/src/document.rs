@@ -2430,8 +2430,14 @@ impl Document {
             .or_else(|| config.soft_wrap.wrap_indicator.clone())
             .unwrap_or_else(|| "↪ ".into());
         let tab_width = self.tab_width() as u16;
+        // One side of a diff shown beside the other never wraps: each row faces its
+        // counterpart, and a line wrapped on one side only would push the rest apart.
+        let beside = self
+            .review
+            .as_ref()
+            .is_some_and(|review| review.side.is_some());
         TextFormat {
-            soft_wrap: enable_soft_wrap && viewport_width > 10 && !self.large,
+            soft_wrap: enable_soft_wrap && viewport_width > 10 && !self.large && !beside,
             tab_width,
             max_wrap: max_wrap.min(viewport_width / 4),
             max_indent_retain: max_indent_retain.min(viewport_width * 2 / 5),
@@ -2595,6 +2601,26 @@ mod test {
         doc.review = None;
         assert!(doc.apply(&edit, view));
         assert_eq!(doc.text(), "badoriginal\n");
+    }
+
+    #[test]
+    fn a_side_of_a_diff_shown_beside_the_other_never_wraps() {
+        let mut config = Config::default();
+        config.soft_wrap.enable = Some(true);
+        let mut doc = Document::from(
+            Rope::from("a line longer than the view\n"),
+            None,
+            Arc::new(ArcSwap::new(Arc::new(config))),
+            Arc::new(ArcSwap::from_pointee(syntax::Loader::default())),
+        );
+        assert!(doc.text_format(40, None).soft_wrap);
+        doc.review = Some(crate::review::Review::default());
+        assert!(doc.text_format(40, None).soft_wrap);
+        doc.review = Some(crate::review::Review {
+            side: Some(crate::review::Side::New),
+            ..crate::review::Review::default()
+        });
+        assert!(!doc.text_format(40, None).soft_wrap);
     }
 
     #[test]

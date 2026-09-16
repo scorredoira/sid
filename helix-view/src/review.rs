@@ -17,7 +17,7 @@ pub enum LineKind {
     Removed,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ReviewLine {
     pub kind: LineKind,
     pub old: Option<usize>,
@@ -32,11 +32,21 @@ pub struct ReviewSource {
     pub syntax: Option<Syntax>,
 }
 
+/// One side of a diff shown beside the other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Side {
+    Old,
+    New,
+}
+
 #[derive(Default)]
 pub struct Review {
     pub lines: Vec<ReviewLine>,
     pub sources: Vec<ReviewSource>,
     pub digits: usize,
+    /// The side this buffer shows when the diff is split in two, numbered by that side
+    /// alone; `None` shows both sides one above the other, with both numbers.
+    pub side: Option<Side>,
     /// Inline number columns belong only to code, leaving prose and headings flush left.
     pub number_annotations: [Vec<InlineAnnotation>; 3],
 }
@@ -63,13 +73,13 @@ impl Review {
                     LineKind::Removed => (2, "−"),
                     _ => (0, " "),
                 };
-                self.number_annotations[layer].push(InlineAnnotation::new(
-                    char_idx,
-                    format!(
-                        "{old:>width$} {new:>width$} {marker}  ",
-                        width = self.digits
-                    ),
-                ));
+                let width = self.digits;
+                let numbers = match self.side {
+                    None => format!("{old:>width$} {new:>width$} {marker}  "),
+                    Some(Side::Old) => format!("{old:>width$} {marker}  "),
+                    Some(Side::New) => format!("{new:>width$} {marker}  "),
+                };
+                self.number_annotations[layer].push(InlineAnnotation::new(char_idx, numbers));
             }
             char_idx += text.chars().count();
         }
@@ -140,8 +150,18 @@ impl Review {
         })
     }
 
+    /// Parses the sources some line shows: one side of a split diff leaves the other's
+    /// sources unparsed.
     pub fn prepare_syntax(&mut self, loader: &Loader) {
-        for source in &mut self.sources {
+        let shown: std::collections::HashSet<usize> = self
+            .lines
+            .iter()
+            .filter_map(|line| line.source.map(|(source, _)| source))
+            .collect();
+        for (index, source) in self.sources.iter_mut().enumerate() {
+            if !shown.contains(&index) {
+                continue;
+            }
             let Some(language) = loader.language_for_filename(&source.path) else {
                 continue;
             };

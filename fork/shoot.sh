@@ -85,6 +85,11 @@ review_shots() {
 	keys S-F1
 	typed review_
 	shoot shortcuts
+	keys Escape
+	# The same diff side by side, with the code panel alone on the screen.
+	keys C-M-d
+	keys F6
+	shoot side-by-side 2
 }
 
 # Nothing open yet: what the editor shows before there is a file to show.

@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 
 use helix_core::Rope;
-use helix_view::review::{LineKind, Review, ReviewLine, ReviewSource};
+use helix_view::review::{LineKind, Review, ReviewLine, ReviewSource, Side};
 
 use super::git::Answer;
 
@@ -26,6 +26,75 @@ impl ParsedReview {
         introduction.lines.append(&mut self.review.lines);
         self.review.lines = introduction.lines;
         self.review.prepare_line_numbers(&self.text);
+    }
+
+    /// The diff as two buffers of the same rows, the old side and the new: what the rows
+    /// before and after a change say goes on both, a removed line only on the old, an added
+    /// one only on the new, and the lines of a change pair up row by row, the shorter side
+    /// padded with blank rows so each row faces its counterpart.
+    pub fn split(self) -> [ParsedReview; 2] {
+        let texts: Vec<&str> = self.text.split_terminator('\n').collect();
+        let mut sides = [Side::Old, Side::New].map(|side| {
+            let review = Review {
+                sources: self
+                    .review
+                    .sources
+                    .iter()
+                    .map(|source| ReviewSource {
+                        path: source.path.clone(),
+                        text: source.text.clone(),
+                        syntax: None,
+                    })
+                    .collect(),
+                digits: self.review.digits,
+                side: Some(side),
+                ..Review::default()
+            };
+            (Vec::new(), review)
+        });
+        let lines = &self.review.lines;
+        let mut row = 0;
+        while row < lines.len() {
+            let changed =
+                |line: &ReviewLine| matches!(line.kind, LineKind::Added | LineKind::Removed);
+            if !changed(&lines[row]) {
+                for (texts_of_side, review) in &mut sides {
+                    texts_of_side.push(texts[row]);
+                    review.lines.push(lines[row].clone());
+                }
+                row += 1;
+                continue;
+            }
+            let end = row + lines[row..].iter().take_while(|line| changed(line)).count();
+            let of_kind = |kind| (row..end).filter(move |&index| lines[index].kind == kind);
+            let removed: Vec<usize> = of_kind(LineKind::Removed).collect();
+            let added: Vec<usize> = of_kind(LineKind::Added).collect();
+            for pair in 0..removed.len().max(added.len()) {
+                for ((texts_of_side, review), indexes) in sides.iter_mut().zip([&removed, &added]) {
+                    match indexes.get(pair) {
+                        Some(&index) => {
+                            texts_of_side.push(texts[index]);
+                            review.lines.push(lines[index].clone());
+                        }
+                        None => {
+                            texts_of_side.push("");
+                            review.lines.push(ReviewLine {
+                                kind: LineKind::Separator,
+                                old: None,
+                                new: None,
+                                source: None,
+                            });
+                        }
+                    }
+                }
+            }
+            row = end;
+        }
+        sides.map(|(texts_of_side, mut review)| {
+            let text = texts_of_side.join("\n") + "\n";
+            review.prepare_line_numbers(&text);
+            ParsedReview { text, review }
+        })
     }
 }
 
@@ -591,6 +660,98 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn side_by_side_each_row_faces_its_counterpart() {
+        let patch = "diff --git a/demo.rs b/demo.rs\n--- a/demo.rs\n+++ b/demo.rs\n@@ -1,7 +1,6 @@\n keep\n-one\n-two\n-three\n+uno\n same\n-gone\n+new\n+newer\n last\n";
+        let [old, new] = parse(patch).unwrap().split();
+        assert_eq!(
+            old.text,
+            "demo.rs\nkeep\none\ntwo\nthree\nsame\ngone\n\nlast\n"
+        );
+        assert_eq!(new.text, "demo.rs\nkeep\nuno\n\n\nsame\nnew\nnewer\nlast\n");
+        let kinds = |side: &ParsedReview| -> Vec<LineKind> {
+            side.review.lines.iter().map(|line| line.kind).collect()
+        };
+        use LineKind::*;
+        assert_eq!(
+            kinds(&old),
+            [Header, Context, Removed, Removed, Removed, Context, Removed, Separator, Context]
+        );
+        assert_eq!(
+            kinds(&new),
+            [Header, Context, Added, Separator, Separator, Context, Added, Added, Context]
+        );
+        // Every code row keeps its place in the file, so blame and a switch back to one
+        // above the other land on the same line.
+        assert_eq!(
+            (old.review.lines[6].old, old.review.lines[6].new),
+            (Some(6), None)
+        );
+        assert_eq!(
+            (new.review.lines[7].old, new.review.lines[7].new),
+            (None, Some(5))
+        );
+        assert_eq!(
+            (old.review.lines[5].old, old.review.lines[5].new),
+            (Some(5), Some(3))
+        );
+        assert_eq!(old.review.lines[7].source, None);
+        for side in [&old, &new] {
+            for (row, line) in side.review.lines.iter().enumerate() {
+                if let Some((source, source_line)) = line.source {
+                    let code = side.review.sources[source]
+                        .text
+                        .line(source_line)
+                        .to_string();
+                    assert_eq!(
+                        code.trim_end_matches('\n'),
+                        side.text.lines().nth(row).unwrap()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn side_by_side_numbers_each_side_by_its_own_lines() {
+        let patch = "diff --git a/demo.rs b/demo.rs\n--- a/demo.rs\n+++ b/demo.rs\n@@ -10,2 +20,2 @@\n keep\n-old\n+new\n";
+        let unified = parse(patch).unwrap();
+        let numbers = |review: &Review| -> Vec<Vec<String>> {
+            review
+                .number_annotations
+                .iter()
+                .map(|layer| layer.iter().map(|a| a.text.to_string()).collect())
+                .collect()
+        };
+        assert_eq!(numbers(&unified.review)[0], [" 10  20    "]);
+        let [old, new] = unified.split();
+        assert_eq!(old.review.side, Some(Side::Old));
+        assert_eq!(
+            numbers(&old.review),
+            [vec![" 10    "], vec![], vec![" 11 −  "]]
+        );
+        assert_eq!(
+            numbers(&new.review),
+            [vec![" 20    "], vec![" 21 +  "], vec![]]
+        );
+    }
+
+    #[test]
+    fn side_by_side_keeps_the_commit_and_the_notes_on_both_sides() {
+        let patch = "diff --git a/a.txt b/a.txt\nnew file mode 100644\n--- /dev/null\n+++ b/a.txt\n@@ -0,0 +1 @@\n+first\n\\ No newline at end of file\n";
+        let mut parsed = parse(patch).unwrap();
+        parsed.prepend_commit("subject\n");
+        let [old, new] = parsed.split();
+        assert_eq!(
+            old.text,
+            "Commit\nsubject\n\nDiffs\na.txt  ·  added\n\nNo newline at end of file\n"
+        );
+        assert_eq!(
+            new.text,
+            "Commit\nsubject\n\nDiffs\na.txt  ·  added\nfirst\nNo newline at end of file\n"
+        );
     }
 
     #[test]

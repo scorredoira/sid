@@ -2319,6 +2319,7 @@ impl Component for EditorView {
             self.markdown_preview
                 .render_full(editor_area, surface, cx.editor);
         } else {
+            self.sidebar.follow_diff(cx.editor);
             for (view, is_focused) in cx.editor.tree.views() {
                 let doc = cx.editor.document(view.doc).unwrap();
                 self.render_view(cx.editor, doc, view, editor_area, surface, is_focused);
@@ -2507,6 +2508,7 @@ fn review_menu_entries(
     let commits = view.sidebar.showing(sidebar::TabKind::Commits);
     let hidden = view.sidebar.code_hidden();
     let full = view.sidebar.full_context();
+    let beside = view.sidebar.side_by_side();
     let files = view.sidebar.files_visible();
     let mut entries = vec![
         context_menu::Entry::new(
@@ -2553,6 +2555,17 @@ fn review_menu_entries(
             "F4",
             Box::new(|compositor, cx| {
                 run_command(compositor, cx, MappableCommand::review_context_toggle)
+            }),
+        ));
+        entries.push(context_menu::Entry::new(
+            if beside {
+                "Show one side above the other"
+            } else {
+                "Show side by side"
+            },
+            "Ctrl-Alt-d",
+            Box::new(|compositor, cx| {
+                run_command(compositor, cx, MappableCommand::review_side_by_side_toggle)
             }),
         ));
     }

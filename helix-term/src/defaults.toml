@@ -118,6 +118,8 @@ A-F = ":format"
 # Git from wherever you are: who changed this line, and the file's history.
 "C-A-b" = "blame_line"
 "C-A-l" = "file_history"
+# And a diff side by side, or one side above the other.
+"C-A-d" = "review_side_by_side_toggle"
 C-B = "markdown_preview_toggle"
 C-M = "markdown_preview_full"
 

@@ -427,6 +427,7 @@ impl MappableCommand {
         review_code_toggle, "Show or hide the code panel while reviewing commits",
         review_files_toggle, "Show or hide the commit files panel",
         review_context_toggle, "Toggle full file context in the current commit diff",
+        review_side_by_side_toggle, "Show the current diff side by side, or one side above the other",
         keyboard_shortcuts, "Show a searchable reference of keyboard shortcuts",
         sidebar_reveal, "Reveal the current file in the sidebar's tree, focused",
         explorer_new, "Create a file or folder next to the file tree's selection",
