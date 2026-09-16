@@ -75,6 +75,12 @@ C-F = "global_search"
 C-b = "sidebar_toggle"
 C-E = "sidebar_focus"
 C-R = "sidebar_reveal"
+# The file tree's own three, on keys of their own so they work wherever the focus is and
+# shadow nothing: what they act on is the row the tree has selected, or the file being
+# edited when no tree is on screen.
+"C-A-n" = "explorer_new"
+"C-A-r" = "explorer_rename"
+S-del = "explorer_delete"
 # The same without Shift, for the terminals where Ctrl-Shift-letter arrives as Ctrl-letter.
 C-e = "sidebar_focus"
 C-r = "sidebar_reveal"
@@ -141,6 +147,8 @@ Cmd-G = "search_prev"
 Cmd-b = "sidebar_toggle"
 Cmd-E = "sidebar_focus"
 Cmd-R = "sidebar_reveal"
+"Cmd-A-n" = "explorer_new"
+"Cmd-A-r" = "explorer_rename"
 Cmd-O = "lsp_or_syntax_symbol_picker"
 Cmd-t = "lsp_or_syntax_workspace_symbol_picker"
 Cmd-up = "goto_file_start"

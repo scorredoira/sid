@@ -143,11 +143,6 @@ impl Shortcuts {
             ),
             (
                 "Sidebar",
-                "Ctrl+u / Ctrl+d",
-                "Move half a page through the focused list",
-            ),
-            (
-                "Sidebar",
                 "Home / End",
                 "First / last item in the focused list",
             ),
@@ -163,16 +158,34 @@ impl Shortcuts {
             ("Sidebar", "F5", "Refresh the current list"),
             (
                 "Files",
-                "Ctrl+f",
+                "/",
                 "Filter the file tree by name; Esc clears the filter",
             ),
-            ("Files", "Ctrl+n", "Create a file or directory"),
-            ("Files", "F2", "Rename the selected file or directory"),
-            ("Files", "Ctrl+h", "Show or hide hidden files"),
+            (
+                "Files",
+                "Ctrl+Alt+n",
+                "Create a file or directory, from anywhere",
+            ),
+            (
+                "Files",
+                "Ctrl+Alt+r",
+                "Rename the selected file or directory, from anywhere",
+            ),
+            (
+                "Files",
+                "Shift+Delete",
+                "Delete the selected item after confirmation, from anywhere",
+            ),
+            ("Files", ".", "Show or hide hidden files"),
             (
                 "Files",
                 "Delete",
                 "Delete the selected item after confirmation",
+            ),
+            (
+                "Files",
+                "Click / double click",
+                "Show the file and stay in the tree / open it and go to the code",
             ),
             (
                 "Changes",
@@ -188,7 +201,7 @@ impl Shortcuts {
             ),
             (
                 "Commits",
-                "Ctrl+f",
+                "/",
                 "Filter commits by hash, subject or author; Esc clears the filter",
             ),
             (

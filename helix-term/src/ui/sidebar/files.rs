@@ -465,8 +465,13 @@ impl PromptTarget {
     }
 }
 
-/// `a`: a file, or a directory when the name ends in `/`, next to the cursor.
+/// `Ctrl-Alt-n`: a file, or a directory when the name ends in `/`, next to the cursor.
 pub fn prompt_new(cx: &mut commands::Context, target: PromptTarget) {
+    cx.push_layer(new_dialog(target));
+}
+
+/// The prompt that makes an entry next to `target`, for whoever pushes it.
+pub fn new_dialog(target: PromptTarget) -> Box<dyn compositor::Component> {
     let dir = target.dir();
     let mut line = target.relative(&dir);
     if !line.is_empty() {
@@ -499,24 +504,33 @@ pub fn prompt_new(cx: &mut commands::Context, target: PromptTarget) {
                 cx.editor.set_error(format!("{}: {}", made.display(), err));
                 return;
             }
+            // A new file is made to be written in: it opens and the keys go to it, rather
+            // than staying in the tree where they would walk the rows instead of typing.
+            let mut to_code = false;
             if !made.is_dir() {
-                if let Err(err) = cx.editor.open(&made, Action::Replace) {
-                    cx.editor.set_error(format!("{}: {}", made.display(), err));
+                match cx.editor.open(&made, Action::Replace) {
+                    Ok(_) => to_code = true,
+                    Err(err) => cx.editor.set_error(format!("{}: {}", made.display(), err)),
                 }
             }
-            disk_changed(cx, made);
+            disk_changed_then(cx, made, to_code);
         }),
     )
     .with_line(&line);
 
-    cx.push_layer(Box::new(ask));
+    Box::new(ask)
 }
 
-/// `r`: the entry under the cursor gets a new name, its open buffers going along.
+/// `Ctrl-Alt-r`: the entry under the cursor gets a new name, its open buffers going along.
 pub fn prompt_rename(cx: &mut commands::Context, target: PromptTarget) {
-    let Some(source) = target.path.clone() else {
-        return;
-    };
+    if let Some(dialog) = rename_dialog(target) {
+        cx.push_layer(dialog);
+    }
+}
+
+/// The prompt that renames `target`, for whoever pushes it.
+pub fn rename_dialog(target: PromptTarget) -> Option<Box<dyn compositor::Component>> {
+    let source = target.path.clone()?;
     let line = target.relative(&source);
     let root = target.root;
     let ask = ui::ask::Ask::new(
@@ -560,19 +574,31 @@ pub fn prompt_rename(cx: &mut commands::Context, target: PromptTarget) {
     )
     .with_line(&line);
 
-    cx.push_layer(Box::new(ask));
+    Some(Box::new(ask))
 }
 
-/// `d`: the entry under the cursor is deleted after a confirmation, its buffers closed.
+/// `Del`: the entry under the cursor is deleted after a confirmation, its buffers closed.
 pub fn prompt_delete(cx: &mut commands::Context, target: PromptTarget) {
-    let Some(path) = target.path.clone() else {
-        return;
-    };
+    if let Some(dialog) = delete_dialog(cx.editor, target) {
+        cx.push_layer(dialog);
+    }
+}
+
+/// The confirmation that deletes `target`, for whoever pushes it: the sidebar's own key,
+/// the context menu, or the shortcut that reaches the tree from anywhere.
+pub fn delete_dialog(
+    editor: &Editor,
+    target: PromptTarget,
+) -> Option<Box<dyn compositor::Component>> {
+    let path = target.path.clone()?;
     let is_dir = target.is_dir;
     let kind = if is_dir { "folder" } else { "file" };
     let mut lines = vec![format!("Delete {kind} \"{}\"?", target.relative(&path))];
     if is_dir {
         lines.push("All its contents will also be deleted.".to_string());
+    }
+    if unsaved_under(editor, &path) {
+        lines.push("Unsaved changes to it will be lost.".to_string());
     }
     let answers = vec![
         Answer::new("Cancel", Box::new(|_| {})),
@@ -598,7 +624,7 @@ pub fn prompt_delete(cx: &mut commands::Context, target: PromptTarget) {
         )
         .destructive(),
     ];
-    cx.push_layer(Box::new(Confirm::new("Confirm deletion", lines, answers)));
+    Some(Box::new(Confirm::new("Confirm deletion", lines, answers)))
 }
 
 /// Where `name`, as typed in a prompt, lands below `root`. A name may go into
@@ -643,19 +669,18 @@ fn retarget_documents(editor: &mut Editor, source: &Path, target: &Path) {
     }
 }
 
-/// Closes the unmodified buffers of files that were just deleted; a modified one stays,
-/// with its changes, as a buffer for a file that no longer exists.
+/// Closes the buffers of files that were just deleted, whether or not they had unsaved
+/// changes: a buffer left open for a file that no longer exists writes it back the next
+/// time anything saves, and the file the user just deleted comes back. The confirmation
+/// says so before the deletion happens.
 fn close_documents_under(editor: &mut Editor, target: &Path) {
     let gone: Vec<helix_view::DocumentId> = editor
         .documents()
-        .filter(|doc| {
-            doc.path()
-                .is_some_and(|path| path.starts_with(target) && !doc.is_modified())
-        })
+        .filter(|doc| doc.path().is_some_and(|path| path.starts_with(target)))
         .map(|doc| doc.id())
         .collect();
     for id in gone {
-        match editor.close_document(id, false) {
+        match editor.close_document(id, true) {
             Ok(()) | Err(helix_view::editor::CloseError::DoesNotExist) => {}
             Err(helix_view::editor::CloseError::BufferModified(name)) => {
                 editor.set_error(format!("{} is modified and stays open", name));
@@ -667,12 +692,28 @@ fn close_documents_under(editor: &mut Editor, target: &Path) {
     }
 }
 
+/// Whether anything open under `path` has changes that deleting it would throw away.
+fn unsaved_under(editor: &Editor, path: &Path) -> bool {
+    editor
+        .documents()
+        .any(|doc| doc.is_modified() && doc.path().is_some_and(|open| open.starts_with(path)))
+}
+
 /// Tells the sidebar the disk changed under `path`, once the prompt's own turn is over.
 fn disk_changed(cx: &mut crate::compositor::Context, path: PathBuf) {
+    disk_changed_then(cx, path, false);
+}
+
+/// The same, and with `to_code` the keys go to the file that was just opened instead of
+/// staying in the tree.
+fn disk_changed_then(cx: &mut crate::compositor::Context, path: PathBuf, to_code: bool) {
     let callback = Box::pin(async move {
         let call = job::Callback::EditorCompositor(Box::new(move |editor, compositor| {
             if let Some(view) = compositor.find::<EditorView>() {
                 view.sidebar.disk_changed(editor, &path);
+                if to_code {
+                    view.sidebar.focus_code();
+                }
             }
         }));
         Ok(call)

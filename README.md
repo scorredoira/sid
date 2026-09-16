@@ -65,23 +65,36 @@ on the screen. By now it is a different editor, so it has a name of its own:
 
 ## A sidebar file tree
 
-The editor's own keys — `Ctrl-q`, `Ctrl-s`, `F12` — work while the sidebar has
-the focus.
+The editor's own keys work while the sidebar has the focus, and they mean there
+what they mean in the code: `Ctrl-q` quits, `Ctrl-s` saves, `Ctrl-n` opens a
+buffer, `Ctrl-f` searches the file, `F2` renames a symbol. Nothing the tree does
+is bound over them.
 
 `Ctrl-b` shows or hides it and `Ctrl-e` focuses it; started on a file
 (`sid foo.ts`), the editor opens without it. It follows the file you are
 editing, and `Ctrl-r` takes you to that file in the tree from wherever
 you are. Inside it the arrows move, `Enter`
 opens, and **typing walks to the file whose name you are typing**, the way an
-explorer does; `Ctrl-f` opens a filter on the top row instead, and the tree
+explorer does; `/` opens a filter on the top row instead, and the tree
 narrows to every file in the project whose path contains what you type, folded
 away or not, shown under the folders on the way to it — `Esc` brings the whole
-tree back, folded as it was. `Ctrl-n` creates (a name with
-folders in it, `a/b/c.ts`, makes them; a name that would leave the project is
-refused), `F2` renames, `Delete` deletes, and the right button offers the same
-four on the row it lands on. A click opens a row, the wheel scrolls, and
-dragging the line between the tree and the editor resizes it: the width is
-remembered.
+tree back, folded as it was. `.` shows or hides the files that start with a dot.
+
+What the tree does to the disk is on keys of its own, which work **wherever the
+focus is** — in the tree or in the code — and act on the row the tree has
+selected, or on the file you are editing when no tree is on screen:
+`Ctrl-Alt-n` creates (a name with folders in it, `a/b/c.ts`, makes them; a name
+that would leave the project is refused), `Ctrl-Alt-r` renames, and
+`Shift-Delete` deletes. With the focus in the tree `Delete` deletes too, since
+there is no text there for it to take a character from. The right button offers
+the same on the row it lands on. Deleting closes what the file had open, unsaved
+changes and all — the confirmation says so — so a deleted file stays deleted
+instead of being written back by the next save.
+
+A click shows a file and leaves you in the tree, so the tree's keys keep working
+while you look around; a double click, or `Enter`, opens it and takes you to the
+code. The wheel scrolls, and dragging the line between the tree and the editor
+resizes it: the width is remembered.
 
 ![The tree narrowed by the filter to the files with "pick" in their path](fork/screenshots/filter.png)
 
@@ -146,7 +159,7 @@ screen, and it stays where you scrolled it.
 The **Commits** tab lists the history. A click on a commit shows its whole
 diff in the editor; `Enter` or a double click lists the files it touched, the
 diff then following whatever the cursor is on: a directory, one file. `Esc`
-goes back. `Ctrl-f` opens a filter on the top row: the history narrows to the
+goes back. `/` opens a filter on the top row: the history narrows to the
 commits whose hash starts with what you type (`45f740db8`) or whose subject or
 author contains it, looking through the whole history, not only what is on
 screen — `Esc` brings it all back. History sits above the changed files in one column; drag the divider
@@ -270,6 +283,7 @@ So the keys are the ones you already know:
 | `Ctrl-g` | Go to a line |
 | `Ctrl-o` / `Ctrl-t` | Go to a symbol in the file / in the project |
 | `Ctrl-b` / `Ctrl-e` / `Ctrl-r` | The sidebar: show or hide / focus / reveal this file |
+| `Ctrl-Alt-n` / `Ctrl-Alt-r` / `Shift-Delete` | The file tree's selection: create beside it / rename it / delete it, wherever the focus is |
 | `Shift-F11` | Collapse every directory of the file tree, wherever the focus is |
 | `Shift-F5` | Check for a newer release of sid, and install it if you say so |
 | `Ctrl-PageUp` / `Ctrl-PageDown` | The tab before / after this one |

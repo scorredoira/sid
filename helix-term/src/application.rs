@@ -1466,6 +1466,15 @@ impl Application {
 
         let mut opened = 0;
         for file in &session.files {
+            // A file that went is one tab fewer. Opening it would not fail: it would make
+            // an empty buffer over a path with nothing behind it, and the next thing that
+            // saves would write the file back — which is how a file deleted from the tree
+            // came back the next time the project opened.
+            if !file.is_file() {
+                log::info!("Not opening {}: it is no longer there", file.display());
+                continue;
+            }
+
             // The first one makes the view every other one loads into.
             let action = match opened {
                 0 => Action::VerticalSplit,
@@ -1521,6 +1530,10 @@ impl Application {
                 }
             }
             Pane::View { file, line, column } => {
+                if !file.is_file() {
+                    log::info!("Not showing {}: it is no longer there", file.display());
+                    return;
+                }
                 let action = match split {
                     None => Action::Replace,
                     Some(Layout::Vertical) => Action::VerticalSplit,

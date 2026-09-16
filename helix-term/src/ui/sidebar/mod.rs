@@ -590,6 +590,35 @@ impl Sidebar {
         }
     }
 
+    /// What a shortcut that reaches the tree from anywhere acts on: the row the Files tab
+    /// has selected when it is on screen with one, else the file being edited. So New,
+    /// Rename and Delete mean the same thing whether the focus is in the tree or in the
+    /// code, which is the whole point of their having their own keys.
+    pub fn target_anywhere(&self, editor: &Editor) -> files::PromptTarget {
+        if self.open && self.tab == TabKind::Files {
+            let target = self.prompt_target();
+            if target.path.is_some() {
+                return target;
+            }
+        }
+        files::PromptTarget {
+            root: self.root.clone(),
+            path: doc!(editor).path().map(Path::to_path_buf),
+            is_dir: false,
+        }
+    }
+
+    /// Brings the tree on screen, without taking the focus: a shortcut that acts on a row
+    /// shows which row it acted on.
+    pub fn show_files(&mut self, editor: &mut Editor) {
+        if !self.open {
+            self.toggle(editor);
+        }
+        if self.tab != TabKind::Files {
+            self.switch_tab(TabKind::Files, editor);
+        }
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent, cx: &mut commands::Context) -> EventResult {
         let editor = &mut cx.editor;
         // Inside a commit's files the keys are the files' own; the filter is the history's.
@@ -616,7 +645,6 @@ impl Sidebar {
         }
         let editor = &mut cx.editor;
         let before = self.active().list().cursor;
-        let half_page = self.active().list().half_page();
         let page = self.active().list().page as isize;
         match (key.code, key.modifiers) {
             (KeyCode::Esc, _) => {
@@ -632,12 +660,6 @@ impl Sidebar {
             }
             (KeyCode::Up, _) => {
                 self.active_mut().list_mut().move_by(-1);
-            }
-            (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
-                self.active_mut().list_mut().move_by(half_page);
-            }
-            (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
-                self.active_mut().list_mut().move_by(-half_page);
             }
             (KeyCode::PageDown, _) => {
                 self.active_mut().list_mut().move_by(page);
@@ -693,19 +715,14 @@ impl Sidebar {
                     self.switch_tab(next, editor);
                 }
             }
-            (KeyCode::Char('n'), KeyModifiers::CONTROL) if self.active().edits_disk() => {
-                let target = self.prompt_target();
-                files::prompt_new(cx, target);
-            }
-            (KeyCode::F(2), _) if self.active().edits_disk() => {
-                let target = self.prompt_target();
-                files::prompt_rename(cx, target);
-            }
+            // Delete is the tree's own: there is no text here for it to take a character
+            // from, so it shadows nothing. New and rename are shortcuts that reach the
+            // tree from anywhere, so they are not bound a second time here.
             (KeyCode::Delete, _) if self.active().edits_disk() => {
                 let target = self.prompt_target();
                 files::prompt_delete(cx, target);
             }
-            (KeyCode::Char('h'), KeyModifiers::CONTROL) if self.tab == TabKind::Files => {
+            (KeyCode::Char('.'), KeyModifiers::NONE) if self.tab == TabKind::Files => {
                 self.toggle_hidden(editor);
             }
             // Anything the sidebar does not use but the editor might: it goes through, so
@@ -724,16 +741,17 @@ impl Sidebar {
         EventResult::Consumed(None)
     }
 
-    /// The filter box of the Files and Commits tabs: Ctrl-f opens it, what is typed narrows
+    /// The filter box of the Files and Commits tabs: `/` opens it, what is typed narrows
     /// the rows, Backspace takes a letter back, and Esc clears it and brings the whole tree
-    /// or history back. Answers only for the keys the box takes.
+    /// or history back. Answers only for the keys the box takes. The key carries no
+    /// modifier, so nothing the editor's shortcuts do is shadowed while the tree has the
+    /// focus; once the box is open a typed `/` is text like any other letter.
     fn handle_filter_key(&mut self, key: KeyEvent, editor: &mut Editor) -> Option<EventResult> {
         let text = self.filter().map(str::to_string);
         match (key.code, key.modifiers, text) {
-            (KeyCode::Char('f'), KeyModifiers::CONTROL, None) => {
+            (KeyCode::Char('/'), KeyModifiers::NONE, None) => {
                 self.set_filter(editor, Some(String::new()));
             }
-            (KeyCode::Char('f'), KeyModifiers::CONTROL, Some(_)) => {}
             (KeyCode::Esc, _, Some(_)) => {
                 self.set_filter(editor, None);
                 // The folds are back as they were, so the file opened from a match is
@@ -946,7 +964,12 @@ impl Sidebar {
                 };
                 if self.open_row(editor, how) {
                     self.code_hidden = false;
-                    self.focused = false;
+                    // A single click on a file shows it but leaves you in the tree, so the
+                    // tree's own keys keep working while you look around; a double click,
+                    // or Enter, is what says you are done here and takes you to the code.
+                    if double || self.tab != TabKind::Files {
+                        self.focused = false;
+                    }
                 }
             }
             MouseEventKind::ScrollDown => {
@@ -1210,14 +1233,14 @@ fn open_menu(row: u16, column: u16, target: PromptTarget, hidden: bool) -> Event
         let entries = vec![
             context_menu::Entry::new(
                 "New file or folder",
-                "Ctrl-n",
+                "Ctrl-Alt-n",
                 Box::new(move |compositor, cx| {
                     context_menu::with_context(compositor, cx, |cx| files::prompt_new(cx, for_new))
                 }),
             ),
             context_menu::Entry::new(
                 "Rename",
-                "F2",
+                "Ctrl-Alt-r",
                 Box::new(move |compositor, cx| {
                     context_menu::with_context(compositor, cx, |cx| {
                         files::prompt_rename(cx, for_rename)
@@ -1239,7 +1262,7 @@ fn open_menu(row: u16, column: u16, target: PromptTarget, hidden: bool) -> Event
                 } else {
                     "Hide hidden files"
                 },
-                "Ctrl-h",
+                ".",
                 Box::new(|compositor, cx| {
                     if let Some(view) = compositor.find::<editor::EditorView>() {
                         view.sidebar.toggle_hidden(cx.editor);

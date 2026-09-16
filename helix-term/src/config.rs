@@ -290,6 +290,11 @@ mod tests {
             assert_eq!(command_at(&config, mode, &["S-F1"]), "keyboard_shortcuts");
             assert_eq!(command_at(&config, mode, &["C-e"]), "sidebar_focus");
             assert_eq!(command_at(&config, mode, &["C-r"]), "sidebar_reveal");
+            // What the file tree does to the disk is reachable from every mode, so it
+            // works whether the focus is in the tree or in the code.
+            assert_eq!(command_at(&config, mode, &["C-A-n"]), "explorer_new");
+            assert_eq!(command_at(&config, mode, &["C-A-r"]), "explorer_rename");
+            assert_eq!(command_at(&config, mode, &["S-del"]), "explorer_delete");
             assert_eq!(
                 command_at(&config, mode, &["C-o"]),
                 "lsp_or_syntax_symbol_picker"

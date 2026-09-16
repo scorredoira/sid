@@ -429,6 +429,9 @@ impl MappableCommand {
         review_context_toggle, "Toggle full file context in the current commit diff",
         keyboard_shortcuts, "Show a searchable reference of keyboard shortcuts",
         sidebar_reveal, "Reveal the current file in the sidebar's tree, focused",
+        explorer_new, "Create a file or folder next to the file tree's selection",
+        explorer_rename, "Rename the file tree's selection",
+        explorer_delete, "Delete the file tree's selection, after confirmation",
         markdown_preview_toggle, "Show or hide the Markdown preview beside the file",
         markdown_preview_full, "Show or hide the Markdown preview on its own, filling the screen",
         quit_saving, "Save every file that has one and quit, asking about what cannot be saved",
@@ -4290,6 +4293,39 @@ fn sidebar_reveal(_cx: &mut Context) {
         let editor_view = compositor.find::<ui::EditorView>().unwrap();
         editor_view.sidebar.reveal(editor);
     });
+}
+
+/// The three things the file tree does to the disk, on the keys that do them wherever the
+/// focus is: the tree comes on screen, the row it has selected is what is acted on, and
+/// the dialog opens over whatever you were doing. Without a tree on screen they act on the
+/// file being edited, which is the row the tree would be on anyway.
+fn explorer_dialog(
+    build: impl FnOnce(&Editor, ui::sidebar::files::PromptTarget) -> Option<Box<dyn Component>>
+        + Send
+        + 'static,
+) {
+    job::dispatch_blocking(move |editor, compositor| {
+        let Some(editor_view) = compositor.find::<ui::EditorView>() else {
+            return;
+        };
+        editor_view.sidebar.show_files(editor);
+        let target = editor_view.sidebar.target_anywhere(editor);
+        if let Some(dialog) = build(editor, target) {
+            compositor.push(dialog);
+        }
+    });
+}
+
+fn explorer_new(_cx: &mut Context) {
+    explorer_dialog(|_editor, target| Some(ui::sidebar::files::new_dialog(target)));
+}
+
+fn explorer_rename(_cx: &mut Context) {
+    explorer_dialog(|_editor, target| ui::sidebar::files::rename_dialog(target));
+}
+
+fn explorer_delete(_cx: &mut Context) {
+    explorer_dialog(ui::sidebar::files::delete_dialog);
 }
 
 /// Runs a typable command as if it had been typed, for the few places that stand in for
