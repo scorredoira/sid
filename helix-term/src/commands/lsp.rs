@@ -415,7 +415,8 @@ pub fn symbol_picker(cx: &mut Context) {
             let columns = [
                 ui::PickerColumn::new("kind", |item: &SymbolInformationItem, _| {
                     display_symbol_kind(item.symbol.kind).into()
-                }),
+                })
+                .with_keywords(super::syntax::SYMBOL_KINDS),
                 // Some symbols in the document symbol picker may have a URI that isn't
                 // the current file. It should be rare though, so we concatenate that
                 // URI in with the symbol name in this picker.
@@ -535,7 +536,8 @@ pub fn workspace_symbol_picker(cx: &mut Context) {
     let columns = [
         ui::PickerColumn::new("kind", |item: &SymbolInformationItem, _| {
             display_symbol_kind(item.symbol.kind).into()
-        }),
+        })
+        .with_keywords(super::syntax::SYMBOL_KINDS),
         ui::PickerColumn::new("name", |item: &SymbolInformationItem, _| {
             item.symbol.name.as_str().into()
         })

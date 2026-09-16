@@ -211,6 +211,13 @@ pub struct Column<T, D> {
     /// global search) is not used for filtering twice.
     filter: bool,
     hidden: bool,
+    /// Whether each word typed must appear whole in the cell, in order of letters and
+    /// together, rather than letter by letter anywhere: a line of prose read by fuzzy
+    /// matching finds nearly everything.
+    words: bool,
+    /// The values this column takes, when they are few and known: a word typed for the
+    /// primary column that is one of them narrows this column instead.
+    keywords: &'static [&'static str],
 }
 
 impl<T, D> Column<T, D> {
@@ -221,6 +228,8 @@ impl<T, D> Column<T, D> {
             format,
             filter: true,
             hidden: false,
+            words: false,
+            keywords: &[],
         }
     }
 
@@ -234,6 +243,8 @@ impl<T, D> Column<T, D> {
             format,
             filter: false,
             hidden: true,
+            words: false,
+            keywords: &[],
         }
     }
 
@@ -246,11 +257,20 @@ impl<T, D> Column<T, D> {
             format,
             filter: true,
             hidden: true,
+            words: true,
+            keywords: &[],
         }
     }
 
     pub fn without_filtering(mut self) -> Self {
         self.filter = false;
+        self
+    }
+
+    /// Names the values this column takes, so typing one of them whole narrows the
+    /// column without `%name` before it.
+    pub fn with_keywords(mut self, keywords: &'static [&'static str]) -> Self {
+        self.keywords = keywords;
         self
     }
 
@@ -590,7 +610,13 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             })
             .collect();
 
-        let query = PickerQuery::new(columns.iter().map(|col| &col.name).cloned(), default_column);
+        let query = PickerQuery::new(columns.iter().map(|col| &col.name).cloned(), default_column)
+            .with_keywords(
+                columns
+                    .iter()
+                    .filter(|column| !column.keywords.is_empty())
+                    .map(|column| (column.name.clone(), column.keywords)),
+            );
 
         Self {
             columns,
@@ -1146,10 +1172,15 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             if pattern == old_pattern {
                 continue;
             }
-            let is_append = pattern.starts_with(old_pattern);
+            let (pattern, old_pattern) = if column.words {
+                (whole_words(pattern), whole_words(old_pattern))
+            } else {
+                (pattern.to_string(), old_pattern.to_string())
+            };
+            let is_append = pattern.starts_with(&old_pattern);
             self.matcher.pattern.reparse(
                 i,
-                pattern,
+                &pattern,
                 CaseMatching::Smart,
                 Normalization::Smart,
                 is_append,
@@ -2037,3 +2068,24 @@ fn suffix_width(suffix: &[(Cow<str>, Style)]) -> u16 {
 type PickerCallback<T> = Box<dyn Fn(&mut Context, &T, Action)>;
 
 type PanelCallback<T> = Box<dyn Fn(&mut Context, &PanelInput, &[&T])>;
+
+/// Asks nucleo for each word of `query` as it was typed, together and in order: a
+/// leading `'` is its mark for that. A word that already carries a mark of its own
+/// (`^`, `'`, `!`, `$` or a `\` escape) is left as it is.
+pub fn whole_words(query: &str) -> String {
+    let mut out = String::with_capacity(query.len() + 8);
+    let mut word_start = true;
+    for c in query.chars() {
+        if word_start && !c.is_whitespace() {
+            if !matches!(c, '^' | '\'' | '!' | '\\') {
+                out.push('\'');
+            }
+            word_start = false;
+        }
+        if c.is_whitespace() {
+            word_start = true;
+        }
+        out.push(c);
+    }
+    out
+}

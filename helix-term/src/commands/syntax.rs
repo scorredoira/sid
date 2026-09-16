@@ -185,6 +185,35 @@ fn tags_iter<'a>(
     })
 }
 
+/// Every word the symbol pickers' kind column can say, from a language server or a tags
+/// query: typed on its own in the picker it narrows the list to that kind.
+pub const SYMBOL_KINDS: &[&str] = &[
+    "class",
+    "constant",
+    "construct",
+    "enum",
+    "enummem",
+    "event",
+    "field",
+    "file",
+    "function",
+    "interface",
+    "key",
+    "macro",
+    "method",
+    "module",
+    "namespace",
+    "object",
+    "operator",
+    "package",
+    "property",
+    "section",
+    "struct",
+    "type",
+    "typeparam",
+    "variable",
+];
+
 /// A definition the tags query found in a document: what the sidebar's outline lists.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Symbol {
@@ -231,7 +260,8 @@ pub fn syntax_symbol_picker(cx: &mut Context) {
     let tags = tags_iter(syntax, &loader, text, UriOrDocumentId::Id(doc.id()), None);
 
     let columns = vec![
-        PickerColumn::new("kind", |tag: &Tag, _| tag.kind.as_str().into()),
+        PickerColumn::new("kind", |tag: &Tag, _| tag.kind.as_str().into())
+            .with_keywords(SYMBOL_KINDS),
         PickerColumn::new("name", |tag: &Tag, _| tag.name.as_str().into()),
     ];
 
@@ -317,7 +347,8 @@ pub fn syntax_workspace_symbol_picker(cx: &mut Context) {
     let reg = cx.register.unwrap_or('/');
     cx.editor.registers.last_search_register = reg;
     let columns = vec![
-        PickerColumn::new("kind", |tag: &Tag, _| tag.kind.as_str().into()),
+        PickerColumn::new("kind", |tag: &Tag, _| tag.kind.as_str().into())
+            .with_keywords(SYMBOL_KINDS),
         PickerColumn::new("name", |tag: &Tag, _| tag.name.as_str().into()).without_filtering(),
         PickerColumn::new("path", |tag: &Tag, state: &SearchState| {
             match &tag.doc {

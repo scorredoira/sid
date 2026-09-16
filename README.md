@@ -140,7 +140,8 @@ border: the matches listed by line, the file beside them, the same switches.
 
 `F12` goes to the definition of what is under the cursor and `Shift-F12` lists
 its references; `F2` renames it everywhere, and `F8` walks to the next problem
-the language server found. `Ctrl-o` lists the symbols of the file and
+the language server found. `Ctrl-o` lists the symbols of the file — a kind typed whole, `enum` or
+`method`, narrows the list to that kind — and
 `Ctrl-t` those of the whole project, filtered as you type — from the language
 server when there is one, and from the syntax tree when there is not, so they
 work on any file sid can highlight. `Ctrl-Alt-←` and `Ctrl-Alt-→` take you back

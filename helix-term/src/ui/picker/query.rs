@@ -15,6 +15,9 @@ pub(super) struct PickerQuery {
     /// This is calculated at parsing time for use in [Self::active_column].
     /// This Vec is naturally sorted in ascending order and ranges do not overlap.
     column_ranges: Vec<(Range<usize>, Option<Arc<str>>)>,
+    /// Columns with words of their own: a word typed for the primary column that is one
+    /// of them, whole, is meant for that column instead — `enum` lists the enums.
+    keywords: Vec<(Arc<str>, &'static [&'static str])>,
 }
 
 impl PartialEq<HashMap<Arc<str>, Arc<str>>> for PickerQuery {
@@ -36,6 +39,47 @@ impl PickerQuery {
             primary_column,
             inner,
             column_ranges,
+            keywords: Vec::new(),
+        }
+    }
+
+    pub(super) fn with_keywords(
+        mut self,
+        keywords: impl IntoIterator<Item = (Arc<str>, &'static [&'static str])>,
+    ) -> Self {
+        self.keywords = keywords.into_iter().collect();
+        self
+    }
+
+    /// Moves the words typed for the primary column that name a keyword column's value
+    /// over to that column, whole: `enum parse` is `%kind ^enum$ parse`.
+    fn take_keywords(&self, fields: &mut HashMap<Arc<str>, String>) {
+        let primary = &self.column_names[self.primary_column];
+        for (column, words) in &self.keywords {
+            let Some(text) = fields.get(primary) else {
+                return;
+            };
+            let (taken, kept): (Vec<&str>, Vec<&str>) = text
+                .split(' ')
+                .partition(|word| words.iter().any(|known| known.eq_ignore_ascii_case(word)));
+            if taken.is_empty() {
+                continue;
+            }
+            let taken: Vec<String> = taken
+                .iter()
+                .map(|word| format!("^{}$", word.to_ascii_lowercase()))
+                .collect();
+            let kept = kept.join(" ");
+            if kept.trim().is_empty() {
+                fields.remove(primary);
+            } else {
+                fields.insert(primary.clone(), kept);
+            }
+            let entry = fields.entry(column.clone()).or_default();
+            if !entry.is_empty() {
+                entry.push(' ');
+            }
+            entry.push_str(&taken.join(" "));
         }
     }
 
@@ -131,6 +175,7 @@ impl PickerQuery {
         if !in_field && !text.is_empty() {
             finish_field!();
         }
+        self.take_keywords(&mut fields);
 
         let new_inner: HashMap<_, _> = fields
             .into_iter()
@@ -163,6 +208,25 @@ mod test {
     use helix_core::hashmap;
 
     use super::*;
+
+    #[test]
+    fn a_keyword_typed_for_the_primary_column_goes_to_its_own() {
+        let mut query = PickerQuery::new(["kind".into(), "name".into()].into_iter(), 1)
+            .with_keywords([("kind".into(), &["enum", "function"][..])]);
+        query.parse("Enum parse");
+        assert_eq!(
+            query,
+            hashmap!(
+                "kind".into() => "^enum$".into(),
+                "name".into() => "parse".into(),
+            )
+        );
+        query.parse("function");
+        assert_eq!(query, hashmap!("kind".into() => "^function$".into()));
+        // A word that only starts like one is still a name being typed.
+        query.parse("enu");
+        assert_eq!(query, hashmap!("name".into() => "enu".into()));
+    }
 
     #[test]
     fn parse_query_test() {

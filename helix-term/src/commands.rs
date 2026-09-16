@@ -3694,7 +3694,8 @@ mod palette_test {
         let mut buffer = Vec::new();
         let haystack = nucleo::Utf32Str::new(&text, &mut buffer);
         let mut matcher = nucleo::Matcher::new(nucleo::Config::DEFAULT);
-        let pattern = Pattern::parse(query, CaseMatching::Smart, Normalization::Smart);
+        let query = crate::ui::picker::whole_words(query);
+        let pattern = Pattern::parse(&query, CaseMatching::Smart, Normalization::Smart);
         pattern.score(haystack, &mut matcher).is_some()
     }
 
@@ -3708,6 +3709,11 @@ mod palette_test {
         // The name still finds it, and what the command is not about does not.
         assert!(found("side_by_side", "review_side_by_side_toggle"));
         assert!(!found("diff", "undo"));
+        // A word is looked for whole: its letters scattered over a description are not it.
+        assert!(found("search", "search_next"));
+        assert!(!found("search", "select_regex"));
+        assert!(!found("search", "settings"));
+        assert!(found("sel reg", "select_regex"));
     }
 }
 
