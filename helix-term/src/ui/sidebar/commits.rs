@@ -528,6 +528,7 @@ impl CommitsTab {
         let mut pathspecs = Vec::new();
         let mut name = opened.commit.short.clone();
         match row {
+            Row::Symbol(_) => return None,
             Row::Commit(_) => {
                 if !opened.prefix.is_empty() {
                     pathspecs.push(git::pathspec(&opened.prefix));

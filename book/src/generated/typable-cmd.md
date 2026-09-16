@@ -17,8 +17,9 @@
 | `:write!`, `:w!` | Force write changes to disk creating necessary subdirectories. Accepts an optional path (:write! some/path.txt) |
 | `:write-buffer-close`, `:wbc` | Write changes to disk and closes the buffer. Accepts an optional path (:write-buffer-close some/path.txt) |
 | `:write-buffer-close!`, `:wbc!` | Force write changes to disk creating necessary subdirectories and closes the buffer. Accepts an optional path (:write-buffer-close! some/path.txt) |
+| `:check-updates` | Check for a newer release of sid, and install it if you say so. |
 | `:new`, `:n` | Create a new scratch buffer. |
-| `:format`, `:fmt` | Format the file using an external formatter or language server. |
+| `:format`, `:fmt` | Format the file using an external formatter or language server; JSON and XML are formatted by sid itself when neither is there. |
 | `:indent-style` | Set the indentation style for editing. ('t' for tabs or 1-16 for number of spaces.) |
 | `:line-ending` | Set the document's default line ending. Options: crlf, lf. |
 | `:earlier`, `:ear` | Jump back to an earlier point in edit history. Accepts a number of steps or a time span. |

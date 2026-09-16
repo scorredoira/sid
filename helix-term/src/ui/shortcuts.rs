@@ -188,6 +188,26 @@ impl Shortcuts {
                 "Show the file and stay in the tree / open it and go to the code",
             ),
             (
+                "Files",
+                "Ctrl+Alt+o",
+                "Show or hide the outline of the file's functions and types under the tree, from anywhere",
+            ),
+            (
+                "Files",
+                "Alt+↑ / Alt+↓",
+                "Focus the file tree / the outline",
+            ),
+            (
+                "Outline",
+                "Click / Enter",
+                "Go to the definition and stay in the outline / go to the code",
+            ),
+            (
+                "Outline",
+                "Click on \"by name\" or \"by position\"",
+                "List the definitions by name, or in the file's order",
+            ),
+            (
                 "Changes",
                 "Click / Enter",
                 "Show what the selected file changed",
@@ -227,7 +247,8 @@ impl Shortcuts {
         let scope = SCOPES[self.scope];
         let in_scope = scope == "All"
             || scope == entry.scope
-            || (scope == "Sidebar" && matches!(entry.scope, "Files" | "Changes" | "Commits"));
+            || (scope == "Sidebar"
+                && matches!(entry.scope, "Files" | "Outline" | "Changes" | "Commits"));
         in_scope
             && self
                 .query

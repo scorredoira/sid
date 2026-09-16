@@ -15,6 +15,7 @@ pub mod entries;
 pub mod files;
 pub mod git;
 pub mod list;
+pub mod outline;
 mod review;
 pub mod tab;
 
@@ -39,6 +40,7 @@ use commits::CommitsTab;
 use diff_view::DiffView;
 use entries::{Row, RowPaint};
 use files::{FilesTab, PromptTarget};
+use outline::Outline;
 use tab::{Activation, Outcome, TabContext, TabView};
 
 pub use commits::format_age;
@@ -89,6 +91,8 @@ pub struct Sidebar {
     files: FilesTab,
     changes: ChangesTab,
     commits: CommitsTab,
+    /// The definitions of the file being edited, under the tree in the Files tab.
+    outline: Outline,
     diff: DiffView,
     pub open: bool,
     pub focused: bool,
@@ -100,6 +104,8 @@ pub struct Sidebar {
     area: Rect,
     /// Where each tab's label was drawn on the strip, for a click to land on.
     tab_columns: [(u16, u16); TabKind::ALL.len()],
+    /// Where the outline's order was written on its header, for a click to change it.
+    sort_columns: (u16, u16),
     /// The width the separator was dragged to, kept between sessions over the configured.
     width: Option<u16>,
     /// Whether the separator is being dragged, so the mouse is the sidebar's wherever it goes.
@@ -170,10 +176,12 @@ impl Sidebar {
                 )
             }
         };
+        let (outline, outline_error) = Outline::new();
         Self {
             files: FilesTab::new(root.clone()),
             changes: ChangesTab::new(root.clone()),
             commits: CommitsTab::new(root.clone()),
+            outline,
             diff: DiffView::new(root.clone()),
             in_git: git::inside_repository(&root),
             root,
@@ -185,11 +193,12 @@ impl Sidebar {
             revealed: None,
             area: Rect::default(),
             tab_columns: [(0, 0); TabKind::ALL.len()],
+            sort_columns: (0, 0),
             width,
             resizing: false,
             resizing_split: false,
             commit_layout,
-            width_error: width_error.or(layout_error),
+            width_error: width_error.or(layout_error).or(outline_error),
             last_click: None,
             typed: (String::new(), None),
         }
@@ -204,19 +213,81 @@ impl Sidebar {
         }
     }
 
+    /// The two panes of a tab that stacks them: the history over a commit's files, the
+    /// tree over the outline.
     fn stacked_areas(&self) -> Option<[Rect; 2]> {
-        if self.tab == TabKind::Commits && self.commits.has_files() {
-            self.commit_layout.panes(self.area)
-        } else {
-            None
+        match self.tab {
+            TabKind::Commits if self.commits.has_files() => self.commit_layout.panes(self.area),
+            TabKind::Files if self.outline.shown() => self.outline.panes(self.area),
+            _ => None,
         }
+    }
+
+    /// Whether the lower of two stacked panes has the keys.
+    fn lower_focused(&self) -> bool {
+        match self.tab {
+            TabKind::Commits => self.commits.files_focused(),
+            TabKind::Files => self.outline.focused,
+            TabKind::Changes => false,
+        }
+    }
+
+    fn focus_lower(&mut self, lower: bool) {
+        match self.tab {
+            TabKind::Commits => self.commits.focus_files(lower),
+            TabKind::Files => self.outline.focused = lower && self.outline.shown(),
+            TabKind::Changes => {}
+        }
+        self.last_click = None;
     }
 
     fn active_area(&self) -> Rect {
         match self.stacked_areas() {
-            Some(panes) => panes[usize::from(self.commits.panes()[1].2)],
+            Some(panes) => panes[usize::from(self.lower_focused())],
             None => self.area,
         }
+    }
+
+    /// Whether the outline is on screen, under the tree.
+    pub fn outline_visible(&self) -> bool {
+        self.showing(TabKind::Files) && self.outline.shown()
+    }
+
+    pub fn outline_by_name(&self) -> bool {
+        self.outline.by_name()
+    }
+
+    /// Hides the outline when it is on screen; otherwise brings the tree on screen with
+    /// the outline under it, and the keys in the outline.
+    pub fn toggle_outline(&mut self, editor: &mut Editor) {
+        if self.outline_visible() {
+            self.outline.set_shown(false);
+            if self.focused {
+                self.focus_code();
+            }
+            return;
+        }
+        self.show_files(editor);
+        self.outline.set_shown(true);
+        self.focused = true;
+        self.outline.focused = true;
+        self.outline.sync(editor);
+    }
+
+    /// A language server answered the outline's question about a file.
+    pub(crate) fn outline_landed(
+        &mut self,
+        editor: &mut Editor,
+        key: (helix_view::DocumentId, usize),
+        said: Option<Vec<outline::Said>>,
+    ) {
+        self.outline.landed(editor, key, said);
+    }
+
+    /// Lists the outline by name, or back in the file's order.
+    pub fn toggle_outline_sort(&mut self, editor: &mut Editor) {
+        self.outline.toggle_sort(editor);
+        editor.set_status(format!("Outline {}", self.outline.sort_label()));
     }
 
     pub fn resizing(&self) -> bool {
@@ -416,6 +487,7 @@ impl Sidebar {
     /// both.
     fn parts(&mut self) -> (&mut dyn TabView, &mut DiffView) {
         let tab: &mut dyn TabView = match self.tab {
+            TabKind::Files if self.outline.focused => &mut self.outline,
             TabKind::Files => &mut self.files,
             TabKind::Changes => &mut self.changes,
             TabKind::Commits => &mut self.commits,
@@ -423,8 +495,10 @@ impl Sidebar {
         (tab, &mut self.diff)
     }
 
+    /// The list that has the keys: the tab on screen, or the outline under the tree.
     fn active(&self) -> &dyn TabView {
         match self.tab {
+            TabKind::Files if self.outline.focused => &self.outline,
             TabKind::Files => &self.files,
             TabKind::Changes => &self.changes,
             TabKind::Commits => &self.commits,
@@ -433,6 +507,24 @@ impl Sidebar {
 
     fn active_mut(&mut self) -> &mut dyn TabView {
         self.parts().0
+    }
+
+    /// The tab on screen itself, whichever of its panes has the keys.
+    fn tab_view(&self) -> &dyn TabView {
+        match self.tab {
+            TabKind::Files => &self.files,
+            TabKind::Changes => &self.changes,
+            TabKind::Commits => &self.commits,
+        }
+    }
+
+    fn tab_parts(&mut self) -> (&mut dyn TabView, &mut DiffView) {
+        let tab: &mut dyn TabView = match self.tab {
+            TabKind::Files => &mut self.files,
+            TabKind::Changes => &mut self.changes,
+            TabKind::Commits => &mut self.commits,
+        };
+        (tab, &mut self.diff)
     }
 
     /// The tab on screen was just put there: it lays itself out and asks what it asks.
@@ -447,7 +539,7 @@ impl Sidebar {
         }
         self.built = true;
         self.check_git();
-        let (tab, diff) = self.parts();
+        let (tab, diff) = self.tab_parts();
         tab.rebuild(editor);
         let mut cx = TabContext { editor, diff };
         tab.shown(&mut cx);
@@ -473,7 +565,7 @@ impl Sidebar {
         let current = doc!(editor).path().map(Path::to_path_buf);
         self.revealed = current.clone();
         if let Some(path) = current {
-            self.active_mut().reveal(editor, &path);
+            self.tab_parts().0.reveal(editor, &path);
         }
     }
 
@@ -637,8 +729,8 @@ impl Sidebar {
     pub fn handle_key(&mut self, key: KeyEvent, cx: &mut commands::Context) -> EventResult {
         let editor = &mut cx.editor;
         // Inside a commit's files the keys are the files' own; the filter is the history's.
-        let filters = self.tab == TabKind::Files
-            || self.tab == TabKind::Commits && !self.commits.files_focused();
+        // The outline has no filter box: typing walks it as it walks the tree.
+        let filters = !self.lower_focused() && self.tab != TabKind::Changes;
         if filters {
             if let Some(result) = self.handle_filter_key(key, editor) {
                 return result;
@@ -649,13 +741,11 @@ impl Sidebar {
                 return result;
             }
         }
-        if self.tab == TabKind::Commits
-            && self.commits.has_files()
+        if self.stacked_areas().is_some()
             && key.modifiers == KeyModifiers::ALT
             && matches!(key.code, KeyCode::Up | KeyCode::Down)
         {
-            self.commits.focus_files(key.code == KeyCode::Down);
-            self.last_click = None;
+            self.focus_lower(key.code == KeyCode::Down);
             return EventResult::Consumed(None);
         }
         let editor = &mut cx.editor;
@@ -737,7 +827,7 @@ impl Sidebar {
                 let target = self.prompt_target();
                 files::prompt_delete(cx, target);
             }
-            (KeyCode::Char('.'), KeyModifiers::NONE) if self.tab == TabKind::Files => {
+            (KeyCode::Char('.'), KeyModifiers::NONE) if self.active().edits_disk() => {
                 self.toggle_hidden(editor);
             }
             // Anything the sidebar does not use but the editor might: it goes through, so
@@ -858,25 +948,37 @@ impl Sidebar {
             if let Some(panes) = panes {
                 for (index, pane) in panes.iter().enumerate() {
                     if event.row > pane.y && event.row < pane.bottom() {
-                        let files = index == 1;
-                        if self.commits.panes()[1].2 != files {
-                            self.commits.focus_files(files);
-                            self.last_click = None;
+                        let lower = index == 1;
+                        if self.lower_focused() != lower {
+                            self.focus_lower(lower);
                             pane_changed = true;
                         }
                     }
                 }
             }
         }
+        let on_sort_label = divider == Some(event.row)
+            && self.tab == TabKind::Files
+            && event.column >= self.sort_columns.0
+            && event.column < self.sort_columns.1;
         match event.kind {
             MouseEventKind::Down(MouseButton::Left) if event.column == separator => {
                 self.resizing = true;
+            }
+            // The order is written on the rule between the tree and the outline: a click
+            // on the words turns it over, a press anywhere else on the rule drags it.
+            MouseEventKind::Down(MouseButton::Left) if on_sort_label => {
+                self.toggle_outline_sort(editor);
             }
             MouseEventKind::Down(MouseButton::Left) if divider == Some(event.row) => {
                 self.resizing_split = true;
             }
             MouseEventKind::Drag(MouseButton::Left) if self.resizing_split => {
-                self.commit_layout.resize_split(self.area, event.row);
+                if self.tab == TabKind::Commits {
+                    self.commit_layout.resize_split(self.area, event.row);
+                } else {
+                    self.outline.resize_split(self.area, event.row);
+                }
             }
             MouseEventKind::Drag(MouseButton::Left) if self.resizing => {
                 let total = if self.code_hidden() {
@@ -895,10 +997,13 @@ impl Sidebar {
                 }
             }
             MouseEventKind::Up(MouseButton::Left) if self.resizing() => {
+                let split = self.resizing_split;
                 self.resizing = false;
                 self.resizing_split = false;
                 let result = if self.tab == TabKind::Commits {
                     self.commit_layout.save()
+                } else if split {
+                    self.outline.save()
                 } else if let Some(width) = self.width {
                     panel_width::save(WIDTH_FILE, width)
                 } else {
@@ -912,6 +1017,18 @@ impl Sidebar {
             MouseEventKind::Down(MouseButton::Right) if self.tab == TabKind::Commits => {
                 return editor::open_review_menu(event.row, event.column);
             }
+            // The outline's own menu: the order, and a way to put it away.
+            MouseEventKind::Down(MouseButton::Right) if self.outline.focused => {
+                self.focused = true;
+                let pane = self.active_area();
+                if event.row > pane.y {
+                    let line = (event.row - pane.y) as usize;
+                    if let Some(index) = self.outline.list().row_at(line - 1) {
+                        self.outline.list_mut().select(index);
+                    }
+                }
+                return open_outline_menu(event.row, event.column, self.outline.by_name());
+            }
             // The right button takes the row it lands on and offers what can be done to it.
             MouseEventKind::Down(MouseButton::Right) if self.active().edits_disk() => {
                 self.focused = true;
@@ -924,7 +1041,14 @@ impl Sidebar {
                 }
 
                 let hidden = self.files.hidden(editor);
-                return open_menu(event.row, event.column, self.prompt_target(), hidden);
+                let outline = self.outline.shown();
+                return open_menu(
+                    event.row,
+                    event.column,
+                    self.prompt_target(),
+                    hidden,
+                    outline,
+                );
             }
             MouseEventKind::Down(MouseButton::Right) if self.tab == TabKind::Changes => {
                 self.focused = true;
@@ -1036,8 +1160,8 @@ impl Sidebar {
             .map(|step| (from + step) % rows.len())
             .find(|index| {
                 rows[*index]
-                    .entry()
-                    .is_some_and(|entry| entry.name.to_lowercase().starts_with(&typed))
+                    .name()
+                    .is_some_and(|name| name.to_lowercase().starts_with(&typed))
             });
 
         if let Some(index) = found {
@@ -1063,15 +1187,19 @@ impl Sidebar {
             return;
         }
         let page = area.height.saturating_sub(1) as usize;
-        if self.tab == TabKind::Commits {
-            if let Some([history, files]) = self.stacked_areas() {
+        match (self.tab, self.stacked_areas()) {
+            (TabKind::Commits, Some([history, files])) => {
                 self.commits
                     .set_pages((history.height - 1) as usize, (files.height - 1) as usize);
-            } else {
-                self.commits.set_pages(page, page);
             }
-        } else {
-            self.active_mut().list_mut().set_page(page);
+            (TabKind::Commits, None) => self.commits.set_pages(page, page),
+            (TabKind::Files, Some([tree, outline])) => {
+                self.files.list_mut().set_page((tree.height - 1) as usize);
+                self.outline
+                    .list_mut()
+                    .set_page((outline.height - 1) as usize);
+            }
+            _ => self.active_mut().list_mut().set_page(page),
         }
         if !self.built {
             self.came_on_screen(editor);
@@ -1079,6 +1207,9 @@ impl Sidebar {
         let current = doc!(editor).path().map(Path::to_path_buf);
         if current.is_some() && current != self.revealed {
             self.reveal_current(editor);
+        }
+        if self.outline_visible() {
+            self.outline.sync(editor);
         }
 
         let theme = &editor.theme;
@@ -1135,8 +1266,10 @@ impl Sidebar {
             }
         }
 
+        self.sort_columns = (0, 0);
+        let mut sort_columns = (0, 0);
         let tab = self.active();
-        if tab.rows().is_empty() && !(self.tab == TabKind::Commits && self.commits.has_files()) {
+        if tab.rows().is_empty() && self.stacked_areas().is_none() {
             if let Some(message) = tab.empty_message() {
                 let style = if message.is_error {
                     theme.get("error")
@@ -1160,28 +1293,84 @@ impl Sidebar {
 
         let stacked = self.stacked_areas();
         let split = stacked.is_some();
-        let panes = if let Some([history_area, files_area]) = stacked {
+        let panes = if let Some([upper_area, lower_area]) = stacked {
             for x in area.x..area.right().saturating_sub(1) {
-                surface.set_string(x, files_area.y, "─", separator_style);
+                surface.set_string(x, lower_area.y, "─", separator_style);
             }
-            surface.set_string(area.right() - 1, files_area.y, "┤", separator_style);
-            surface.set_stringn(
+            surface.set_string(area.right() - 1, lower_area.y, "┤", separator_style);
+            let heading = if self.tab == TabKind::Commits {
+                " Files "
+            } else {
+                " Outline "
+            };
+            let (end, _) = surface.set_stringn(
                 area.x + 1,
-                files_area.y,
-                " Files ",
+                lower_area.y,
+                heading,
                 content_width.saturating_sub(1),
                 header_style,
             );
-            let [(history, history_list, history_focus), (files, files_list, files_focus)] =
-                self.commits.panes();
-            vec![
-                (history, history_list, history_focus, history_area),
-                (files, files_list, files_focus, files_area),
-            ]
+            if self.tab == TabKind::Files {
+                // The order, at the right edge of the rule, where a click turns it over.
+                let label = format!(" {} ", self.outline.sort_label());
+                let right = area.right().saturating_sub(2);
+                let x = right.saturating_sub(label.len() as u16);
+                if x > end {
+                    let style = if self.outline.focused {
+                        header_style
+                    } else {
+                        inactive_style
+                    };
+                    let (label_end, _) =
+                        surface.set_stringn(x, lower_area.y, &label, (right - x) as usize, style);
+                    sort_columns = (x, label_end);
+                }
+            }
+            match self.tab {
+                TabKind::Commits => {
+                    let [(history, history_list, history_focus), (files, files_list, files_focus)] =
+                        self.commits.panes();
+                    vec![
+                        (history, history_list, history_focus, upper_area, false),
+                        (files, files_list, files_focus, lower_area, false),
+                    ]
+                }
+                _ => vec![
+                    (
+                        self.files.rows(),
+                        self.files.list(),
+                        !self.outline.focused,
+                        upper_area,
+                        false,
+                    ),
+                    (
+                        self.outline.rows(),
+                        self.outline.list(),
+                        self.outline.focused,
+                        lower_area,
+                        true,
+                    ),
+                ],
+            }
         } else {
-            vec![(tab.rows(), tab.list(), true, area)]
+            vec![(tab.rows(), tab.list(), true, area, false)]
         };
-        for (rows, list, focused, area) in panes {
+        for (rows, list, focused, area, is_outline) in panes {
+            if is_outline && rows.is_empty() {
+                if let Some(message) = self.outline.empty_message() {
+                    let width = content_width.saturating_sub(1);
+                    surface.set_string_truncated(
+                        area.x + 1,
+                        area.y + 1,
+                        &message.text,
+                        width,
+                        |_| inactive_style,
+                        true,
+                        false,
+                    );
+                }
+                continue;
+            }
             let rows = rows.iter().enumerate().skip(list.scroll).take(list.page);
             for (index, row) in rows {
                 let y = area.y + 1 + (index - list.scroll) as u16;
@@ -1198,9 +1387,12 @@ impl Sidebar {
                 if let Some(selected) = selected {
                     surface.set_style(line, selected);
                 }
-                let current = current
-                    .as_deref()
-                    .is_some_and(|current| row.path() == Some(current));
+                let current = match row {
+                    Row::Symbol(_) => self.outline.is_current(index),
+                    _ => current
+                        .as_deref()
+                        .is_some_and(|current| row.path() == Some(current)),
+                };
                 let paint = RowPaint {
                     line,
                     selected,
@@ -1208,13 +1400,16 @@ impl Sidebar {
                 };
                 match row {
                     Row::Entry(entry) => {
-                        let open = tab.folds().is_some_and(|folds| folds.is_open(&entry.path));
+                        let folds = self.tab_view().folds();
+                        let open = folds.is_some_and(|folds| folds.is_open(&entry.path));
                         entries::draw_entry(surface, &paint, entry, open, theme);
                     }
                     Row::Commit(commit) => commits::draw_commit(surface, &paint, commit, theme),
+                    Row::Symbol(symbol) => outline::draw_symbol(surface, &paint, symbol, theme),
                 }
             }
         }
+        self.sort_columns = sort_columns;
     }
 }
 
@@ -1238,7 +1433,13 @@ pub(crate) fn later(
 
 /// What can be done to the row the pointer is on. Every one of them has a key as well —
 /// the menu is the other way in, never the only one.
-fn open_menu(row: u16, column: u16, target: PromptTarget, hidden: bool) -> EventResult {
+fn open_menu(
+    row: u16,
+    column: u16,
+    target: PromptTarget,
+    hidden: bool,
+    outline: bool,
+) -> EventResult {
     EventResult::Consumed(Some(Box::new(move |compositor, _cx| {
         let for_new = target.clone();
         let for_rename = target.clone();
@@ -1295,6 +1496,66 @@ fn open_menu(row: u16, column: u16, target: PromptTarget, hidden: bool) -> Event
                     let path = path.to_string_lossy().into_owned();
                     if let Err(err) = cx.editor.registers.write('+', vec![path]) {
                         cx.editor.set_error(err.to_string());
+                    }
+                }),
+            ),
+            context_menu::Entry::new(
+                if outline {
+                    "Hide the outline"
+                } else {
+                    "Show the outline"
+                },
+                "Ctrl-Alt-o",
+                Box::new(|compositor, cx| {
+                    if let Some(view) = compositor.find::<editor::EditorView>() {
+                        view.sidebar.toggle_outline(cx.editor);
+                    }
+                }),
+            ),
+        ];
+
+        compositor.push(Box::new(context_menu::ContextMenu::new(
+            (row, column),
+            entries,
+        )));
+    })))
+}
+
+/// What can be done to the outline from a row of it: the order, and putting it away.
+fn open_outline_menu(row: u16, column: u16, by_name: bool) -> EventResult {
+    EventResult::Consumed(Some(Box::new(move |compositor, _cx| {
+        let entries = vec![
+            context_menu::Entry::new(
+                "Go to the definition",
+                "Enter",
+                Box::new(|compositor, cx| {
+                    let Some(view) = compositor.find::<editor::EditorView>() else {
+                        return;
+                    };
+                    if view.sidebar.open_row(cx.editor, Activation::Enter) {
+                        view.sidebar.focus_code();
+                    }
+                }),
+            ),
+            context_menu::Entry::new(
+                if by_name {
+                    "List in the file's order"
+                } else {
+                    "List by name"
+                },
+                "",
+                Box::new(|compositor, cx| {
+                    if let Some(view) = compositor.find::<editor::EditorView>() {
+                        view.sidebar.toggle_outline_sort(cx.editor);
+                    }
+                }),
+            ),
+            context_menu::Entry::new(
+                "Hide the outline",
+                "Ctrl-Alt-o",
+                Box::new(|compositor, cx| {
+                    if let Some(view) = compositor.find::<editor::EditorView>() {
+                        view.sidebar.toggle_outline(cx.editor);
                     }
                 }),
             ),

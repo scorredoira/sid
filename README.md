@@ -96,6 +96,19 @@ while you look around; a double click, or `Enter`, opens it and takes you to the
 code. The wheel scrolls, and dragging the line between the tree and the editor
 resizes it: the width is remembered.
 
+`Ctrl-Alt-o` opens an **outline** under the tree: the functions, types and
+classes of the file you are editing. A running language server says what the
+file defines, every kind of thing it knows; without one the syntax tree does,
+so it works for every language sid highlights with nothing installed. Either
+way it follows what you type. A click goes to the definition and leaves you in the outline;
+`Enter` or a double click takes you to the code. The one your cursor is inside
+is bold, and the outline follows the cursor as the tree follows the file.
+The rule between the two says `by position` or `by name`: a click on it turns
+the order over, and dragging the rest of it resizes the panes. `Alt-↑` and
+`Alt-↓` move the focus between the tree and the outline, and typing walks the
+outline by name as it walks the tree. `Ctrl-Alt-o` again puts it away; what
+you chose is remembered.
+
 ![The tree narrowed by the filter to the files with "pick" in their path](fork/screenshots/filter.png)
 
 The tree reads the disk off to the side, never while drawing, and it notices
@@ -291,6 +304,7 @@ So the keys are the ones you already know:
 | `Ctrl-g` | Go to a line |
 | `Ctrl-o` / `Ctrl-t` | Go to a symbol in the file / in the project |
 | `Ctrl-b` / `Ctrl-e` / `Ctrl-r` | The sidebar: show or hide / focus / reveal this file |
+| `Ctrl-Alt-o` | The outline of this file's functions and types, under the tree |
 | `Ctrl-Alt-n` / `Ctrl-Alt-r` / `Shift-Delete` | The file tree's selection: create beside it / rename it / delete it, wherever the focus is |
 | `Shift-F11` | Collapse every directory of the file tree, wherever the focus is |
 | `Shift-F5` | Check for a newer release of sid, and install it if you say so |

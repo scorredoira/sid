@@ -423,6 +423,8 @@ impl MappableCommand {
         sidebar_toggle, "Show or hide the sidebar",
         sidebar_collapse, "Collapse every directory of the file tree",
         toggle_hidden_files, "Show or hide hidden files in the file tree",
+        outline_toggle, "Show or hide the outline of the current file's functions and types, under the file tree",
+        outline_sort_toggle, "List the outline by name, or in the order the file defines things",
         review_commits_toggle, "Show or hide the git commits panel",
         review_code_toggle, "Show or hide the code panel while reviewing git commits",
         review_files_toggle, "Show or hide the files panel of a git commit",
@@ -3702,6 +3704,7 @@ mod palette_test {
         assert!(found("diff", "review_side_by_side_toggle"));
         assert!(found("git", "blame_line"));
         assert!(found("git", "file_history"));
+        assert!(found("functions", "outline_toggle"));
         // The name still finds it, and what the command is not about does not.
         assert!(found("side_by_side", "review_side_by_side_toggle"));
         assert!(!found("diff", "undo"));
@@ -4544,6 +4547,20 @@ fn sidebar_toggle(_cx: &mut Context) {
     job::dispatch_blocking(|editor, compositor| {
         let editor_view = compositor.find::<ui::EditorView>().unwrap();
         editor_view.sidebar.toggle(editor);
+    });
+}
+
+fn outline_toggle(_cx: &mut Context) {
+    job::dispatch_blocking(|editor, compositor| {
+        let editor_view = compositor.find::<ui::EditorView>().unwrap();
+        editor_view.sidebar.toggle_outline(editor);
+    });
+}
+
+fn outline_sort_toggle(_cx: &mut Context) {
+    job::dispatch_blocking(|editor, compositor| {
+        let editor_view = compositor.find::<ui::EditorView>().unwrap();
+        editor_view.sidebar.toggle_outline_sort(editor);
     });
 }
 

@@ -1,4 +1,6 @@
 //! The Commits tab occupies one column, with independently scrollable stacked panes.
+//! The split itself, a proportion of the rows given to the upper pane, is shared with
+//! the Files tab, which stacks the outline under the tree the same way.
 use helix_view::graphics::Rect;
 
 use crate::ui::panel_width;
@@ -6,6 +8,38 @@ use crate::ui::panel_width;
 const STATE_FILE: &str = "sidebar-commits";
 const DEFAULT_MAX_WIDTH: u16 = 110;
 const MIN_PANE_ROWS: u16 = 3;
+
+/// Two panes stacked in `area`, the upper one given `share` thousandths of the usable
+/// rows. Both rectangles include a heading: the tab strip above and the draggable rule
+/// below. Tiny terminals show the focused list alone until both panes fit again.
+pub fn stacked_panes(area: Rect, share: u16) -> Option<[Rect; 2]> {
+    if area.height < 4 {
+        return None;
+    }
+    let rows = area.height - 2;
+    let min = MIN_PANE_ROWS.min(rows / 2);
+    let upper = (u32::from(rows) * u32::from(share) / 1000) as u16;
+    let upper = upper.clamp(min, rows - min);
+    let top = Rect::new(area.x, area.y, area.width, upper + 1);
+    let bottom = Rect::new(area.x, top.bottom(), area.width, area.height - top.height);
+    Some([top, bottom])
+}
+
+/// The share that puts the rule between the panes on screen row `row`; none when the
+/// area is too small to split.
+pub fn share_at(area: Rect, row: u16) -> Option<u16> {
+    if area.height < 4 {
+        return None;
+    }
+    let rows = area.height - 2;
+    let min = MIN_PANE_ROWS.min(rows / 2);
+    let upper = row
+        .saturating_sub(area.y)
+        .saturating_sub(1)
+        .clamp(min, rows - min);
+    // Round up so converting the share back to rows lands exactly on the pointer.
+    Some((u32::from(upper) * 1000).div_ceil(u32::from(rows)) as u16)
+}
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -46,33 +80,14 @@ impl CommitLayout {
             .max(super::MIN_WIDTH)
     }
 
-    /// Both rectangles include a heading: the tab strip above and the draggable rule
-    /// below. Tiny terminals show the focused list alone until both panes fit again.
     pub fn panes(&self, area: Rect) -> Option<[Rect; 2]> {
-        if area.height < 4 {
-            return None;
-        }
-        let rows = area.height - 2;
-        let min = MIN_PANE_ROWS.min(rows / 2);
-        let history = (u32::from(rows) * u32::from(self.history_share) / 1000) as u16;
-        let history = history.clamp(min, rows - min);
-        let top = Rect::new(area.x, area.y, area.width, history + 1);
-        let bottom = Rect::new(area.x, top.bottom(), area.width, area.height - top.height);
-        Some([top, bottom])
+        stacked_panes(area, self.history_share)
     }
 
     pub fn resize_split(&mut self, area: Rect, row: u16) {
-        if area.height < 4 {
-            return;
+        if let Some(share) = share_at(area, row) {
+            self.history_share = share;
         }
-        let rows = area.height - 2;
-        let min = MIN_PANE_ROWS.min(rows / 2);
-        let history = row
-            .saturating_sub(area.y)
-            .saturating_sub(1)
-            .clamp(min, rows - min);
-        // Round up so converting the share back to rows lands exactly on the pointer.
-        self.history_share = (u32::from(history) * 1000).div_ceil(u32::from(rows)) as u16;
     }
 }
 

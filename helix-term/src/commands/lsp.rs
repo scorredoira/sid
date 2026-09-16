@@ -166,7 +166,7 @@ fn jump_to_position(
     }
 }
 
-fn display_symbol_kind(kind: lsp::SymbolKind) -> &'static str {
+pub(crate) fn display_symbol_kind(kind: lsp::SymbolKind) -> &'static str {
     match kind {
         lsp::SymbolKind::FILE => "file",
         lsp::SymbolKind::MODULE => "module",

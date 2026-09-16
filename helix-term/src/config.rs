@@ -311,6 +311,7 @@ mod tests {
             assert_eq!(command_at(&config, mode, &["F6"]), "review_commits_toggle");
             assert_eq!(command_at(&config, mode, &["F7"]), "review_code_toggle");
             assert_eq!(command_at(&config, mode, &["F9"]), "review_files_toggle");
+            assert_eq!(command_at(&config, mode, &["C-A-o"]), "outline_toggle");
             assert_eq!(command_at(&config, mode, &["C-F"]), "global_search");
             assert_eq!(command_at(&config, mode, &["C-b"]), "sidebar_toggle");
             assert_eq!(command_at(&config, mode, &["C-R"]), "sidebar_reveal");

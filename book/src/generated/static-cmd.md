@@ -108,12 +108,20 @@
 | `file_explorer_in_current_directory` | Open file explorer at current working directory |  |
 | `sidebar_focus` | Focus the sidebar, opening it if closed | normal: `` <space>T ``, select: `` <space>T `` |
 | `sidebar_toggle` | Show or hide the sidebar | normal: `` <space>t ``, select: `` <space>t `` |
+| `sidebar_collapse` | Collapse every directory of the file tree |  |
+| `toggle_hidden_files` | Show or hide hidden files in the file tree |  |
+| `outline_toggle` | Show or hide the outline of the current file's functions and types, under the file tree |  |
+| `outline_sort_toggle` | List the outline by name, or in the order the file defines things |  |
 | `review_commits_toggle` | Show or hide the git commits panel |  |
 | `review_code_toggle` | Show or hide the code panel while reviewing git commits |  |
+| `review_files_toggle` | Show or hide the files panel of a git commit |  |
 | `review_context_toggle` | Toggle full file context in the current git diff |  |
 | `review_side_by_side_toggle` | Show the current git diff side by side, or one side above the other |  |
 | `keyboard_shortcuts` | Show a searchable reference of keyboard shortcuts |  |
 | `sidebar_reveal` | Reveal the current file in the sidebar's tree, focused |  |
+| `explorer_new` | Create a file or folder next to the file tree's selection |  |
+| `explorer_rename` | Rename the file tree's selection |  |
+| `explorer_delete` | Delete the file tree's selection, after confirmation |  |
 | `markdown_preview_toggle` | Show or hide the Markdown preview beside the file |  |
 | `markdown_preview_full` | Show or hide the Markdown preview on its own, filling the screen |  |
 | `quit_saving` | Save every file that has one and quit, asking about what cannot be saved |  |

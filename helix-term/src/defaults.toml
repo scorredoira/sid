@@ -120,6 +120,8 @@ A-F = ":format"
 "C-A-l" = "file_history"
 # And a diff side by side, or one side above the other.
 "C-A-d" = "review_side_by_side_toggle"
+# The outline of the file, its functions and types, under the file tree.
+"C-A-o" = "outline_toggle"
 C-B = "markdown_preview_toggle"
 C-M = "markdown_preview_full"
 
@@ -177,6 +179,7 @@ Cmd-A-left = "jump_backward"
 Cmd-A-right = "jump_forward"
 Cmd-A-b = "blame_line"
 Cmd-A-l = "file_history"
+Cmd-A-o = "outline_toggle"
 Cmd-V = "markdown_preview_toggle"
 Cmd-B = "markdown_preview_toggle"
 Cmd-M = "markdown_preview_full"

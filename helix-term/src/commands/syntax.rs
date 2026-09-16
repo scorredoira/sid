@@ -44,6 +44,7 @@ enum TagKind {
     Function,
     Interface,
     Macro,
+    Method,
     Module,
     Section,
     Struct,
@@ -60,6 +61,7 @@ impl TagKind {
             Self::Function => "function",
             Self::Interface => "interface",
             Self::Macro => "macro",
+            Self::Method => "method",
             Self::Module => "module",
             Self::Section => "section",
             Self::Struct => "struct",
@@ -76,6 +78,7 @@ impl TagKind {
             "function" => Some(TagKind::Function),
             "interface" => Some(TagKind::Interface),
             "macro" => Some(TagKind::Macro),
+            "method" => Some(TagKind::Method),
             "module" => Some(TagKind::Module),
             "section" => Some(TagKind::Section),
             "struct" => Some(TagKind::Struct),
@@ -105,6 +108,8 @@ impl UriOrDocumentId {
 struct Tag {
     kind: TagKind,
     name: String,
+    /// Where the name itself starts, in characters: where a jump to the tag lands.
+    name_start: usize,
     start: usize,
     end: usize,
     start_line: usize,
@@ -170,6 +175,7 @@ fn tags_iter<'a>(
         return Some(Tag {
             kind,
             name: text.slice(name_start..name_end).to_string(),
+            name_start,
             start: def_start,
             end: def_end,
             start_line: text.char_to_line(def_start),
@@ -177,6 +183,39 @@ fn tags_iter<'a>(
             doc: doc.clone(),
         });
     })
+}
+
+/// A definition the tags query found in a document: what the sidebar's outline lists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Symbol {
+    /// `function`, `struct`, `class`…: the tags query's word for it.
+    pub kind: &'static str,
+    pub name: String,
+    /// Where the definition starts and ends, in characters.
+    pub start: usize,
+    pub end: usize,
+    /// Where going to the definition lands: on its name.
+    pub jump: usize,
+    pub line: usize,
+}
+
+/// The definitions of a document in the order they appear, from its syntax tree; none
+/// for a language without a tags query.
+pub fn document_symbols(doc: &Document, loader: &Loader) -> Vec<Symbol> {
+    let Some(syntax) = doc.syntax() else {
+        return Vec::new();
+    };
+    let text = doc.text().slice(..);
+    tags_iter(syntax, loader, text, UriOrDocumentId::Id(doc.id()), None)
+        .map(|tag| Symbol {
+            kind: tag.kind.as_str(),
+            name: tag.name,
+            start: tag.start,
+            end: tag.end,
+            jump: tag.name_start,
+            line: tag.start_line,
+        })
+        .collect()
 }
 
 pub fn syntax_symbol_picker(cx: &mut Context) {

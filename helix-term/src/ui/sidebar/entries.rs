@@ -21,6 +21,21 @@ pub enum Row {
     Entry(Entry),
     /// A commit, in the history or standing above its own files.
     Commit(CommitRow),
+    /// A definition in the file being edited, in the outline under the tree.
+    Symbol(SymbolRow),
+}
+
+pub struct SymbolRow {
+    pub name: String,
+    /// `function`, `struct`, `class`…: the tags query's word for it.
+    pub kind: &'static str,
+    /// How many definitions it sits inside, when the outline follows the file's order.
+    pub depth: usize,
+    /// Where the definition starts and ends, in characters of the document.
+    pub start: usize,
+    pub end: usize,
+    /// Where going to it lands: on its name.
+    pub jump: usize,
 }
 
 pub struct Entry {
@@ -53,6 +68,15 @@ impl Row {
     pub fn entry(&self) -> Option<&Entry> {
         match self {
             Row::Entry(entry) => Some(entry),
+            Row::Commit(_) | Row::Symbol(_) => None,
+        }
+    }
+
+    /// What typing in the list walks to: a file's or a directory's name, a definition's.
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            Row::Entry(entry) => Some(&entry.name),
+            Row::Symbol(symbol) => Some(&symbol.name),
             Row::Commit(_) => None,
         }
     }
@@ -69,7 +93,11 @@ impl Row {
     }
 
     pub fn depth(&self) -> usize {
-        self.entry().map_or(0, |entry| entry.depth)
+        match self {
+            Row::Entry(entry) => entry.depth,
+            Row::Symbol(symbol) => symbol.depth,
+            Row::Commit(_) => 0,
+        }
     }
 }
 
