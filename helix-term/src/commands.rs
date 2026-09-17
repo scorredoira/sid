@@ -2712,12 +2712,30 @@ fn make_search_word_bounded(cx: &mut Context) {
 }
 
 fn global_search(cx: &mut Context) {
-    search_panel(cx, SearchScope::Workspace, String::new())
+    let query = selected_query(cx.editor);
+    search_panel(cx, SearchScope::Workspace, query)
 }
 
 fn search_in_file(cx: &mut Context) {
     let id = doc!(cx.editor).id();
-    search_panel(cx, SearchScope::Document(id), String::new())
+    let query = selected_query(cx.editor);
+    search_panel(cx, SearchScope::Document(id), query)
+}
+
+/// What is selected, to be looked for: a word or a piece of one line. A bare cursor
+/// or a selection across lines says nothing about what to search, and starts empty.
+fn selected_query(editor: &Editor) -> String {
+    let (view, doc) = current_ref!(editor);
+    let range = doc.selection(view.id).primary();
+    if range.len() <= 1 {
+        return String::new();
+    }
+
+    let selected = range.fragment(doc.text().slice(..)).to_string();
+    if selected.contains(['\n', '\r']) || selected.trim().is_empty() {
+        return String::new();
+    }
+    selected
 }
 
 /// Where the search panel looks: every file under the working directory, or the one
