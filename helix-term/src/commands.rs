@@ -4447,6 +4447,87 @@ pub(crate) fn ask_where_to_save(done: AfterNaming) {
     });
 }
 
+/// The folders `files` go in that do not exist, each once and in order.
+pub(crate) fn missing_folders(files: &[&Path]) -> Vec<PathBuf> {
+    let mut missing: Vec<PathBuf> = Vec::new();
+    for file in files {
+        let Some(folder) = file.parent() else {
+            continue;
+        };
+        if folder.as_os_str().is_empty() || folder.exists() {
+            continue;
+        }
+        if !missing.iter().any(|known| known == folder) {
+            missing.push(folder.to_path_buf());
+        }
+    }
+    missing
+}
+
+/// Asks, in the middle of the screen, to make the folders `files` need, and runs `then`
+/// once they are made. A save that has nowhere to go says so where it is seen, instead of
+/// failing under the buffer while the key is pressed again and again.
+pub(crate) fn make_folders_then(files: Vec<PathBuf>, then: AfterNaming) {
+    job::dispatch_blocking(move |_editor, compositor| {
+        let paths: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
+        let folders = missing_folders(&paths);
+        if folders.is_empty() {
+            return;
+        }
+
+        let mut lines = Vec::new();
+        if let [file] = files.as_slice() {
+            let name = file
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| file.display().to_string());
+            lines.push(format!(
+                "\"{name}\" cannot be saved: its folder does not exist."
+            ));
+        } else {
+            lines.push("Some files cannot be saved: their folders do not exist.".to_string());
+        }
+        lines.push(String::new());
+        for folder in &folders {
+            lines.push(format!(
+                "  {}",
+                helix_stdx::path::get_relative_path(folder).display()
+            ));
+        }
+        lines.push(String::new());
+        lines.push("Nothing is written until the folder is made.".to_string());
+
+        let title = if folders.len() == 1 {
+            "Folder does not exist"
+        } else {
+            "Folders do not exist"
+        };
+        let make = if folders.len() == 1 {
+            "Create folder and save"
+        } else {
+            "Create folders and save"
+        };
+        let answers = vec![
+            ui::confirm::Answer::new(
+                make,
+                Box::new(move |cx: &mut compositor::Context| {
+                    for folder in &folders {
+                        if let Err(err) = std::fs::create_dir_all(folder) {
+                            cx.editor
+                                .set_error(format!("Could not create {}: {err}", folder.display()));
+                            return;
+                        }
+                    }
+                    then(cx);
+                }),
+            ),
+            ui::confirm::Answer::new("Cancel", Box::new(|_| {})),
+        ];
+
+        compositor.push(Box::new(ui::confirm::Confirm::new(title, lines, answers)));
+    });
+}
+
 /// Asks about each buffer that has changes and no file, one dialog after the next, and
 /// runs `done` when none is left. The editor moves to each one as it is asked about, so
 /// the name is given to the file on screen; cancelling any of them stops everything, and

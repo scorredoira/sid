@@ -1061,7 +1061,10 @@ impl Document {
                     if force {
                         std::fs::DirBuilder::new().recursive(true).create(parent)?;
                     } else {
-                        bail!("can't save file, parent directory does not exist (use :w! to create it)");
+                        bail!(
+                            "can't save: the folder {} does not exist (use :w! to create it)",
+                            parent.display()
+                        );
                     }
                 }
             }

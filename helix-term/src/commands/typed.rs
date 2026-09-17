@@ -576,6 +576,9 @@ pub(crate) fn write_current_as(cx: &mut compositor::Context, name: &str) -> anyh
 /// what waits for the writes and what makes this safe: a buffer whose write failed still
 /// refuses to close.
 pub(crate) fn write_all_and_close(cx: &mut compositor::Context) {
+    if ask_for_missing_folders(cx, write_all_and_close) {
+        return;
+    }
     if !write_the_named(cx) {
         return;
     }
@@ -589,11 +592,35 @@ pub(crate) fn write_all_and_close(cx: &mut compositor::Context) {
 /// The same for quitting: `quit-all` flushes the writes and then refuses to go if anything
 /// is still unsaved, so a write that failed cannot take the editor down with it.
 pub(crate) fn write_all_and_quit(cx: &mut compositor::Context) {
+    if ask_for_missing_folders(cx, write_all_and_quit) {
+        return;
+    }
     if !write_the_named(cx) {
         return;
     }
 
     super::run_typable(cx, "quit-all");
+}
+
+/// Asks to make the folders the buffers with changes need before they can be written,
+/// and runs `then` again once they are made. Returns whether it asked.
+fn ask_for_missing_folders(
+    cx: &mut compositor::Context,
+    then: fn(&mut compositor::Context),
+) -> bool {
+    let files: Vec<PathBuf> = cx
+        .editor
+        .documents()
+        .filter(|doc| doc.is_modified())
+        .filter_map(|doc| doc.path().map(Path::to_path_buf))
+        .collect();
+    let paths: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
+    if super::missing_folders(&paths).is_empty() {
+        return false;
+    }
+
+    super::make_folders_then(files, Box::new(then));
+    true
 }
 
 /// Writes what has a file. A buffer that was just given a name is already being written
@@ -692,15 +719,34 @@ fn write(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow
         return Ok(());
     }
 
-    write_impl(
-        cx,
-        args.first(),
-        WriteOptions {
-            force: false,
-            auto_format: !args.has_flag(WRITE_NO_FORMAT_FLAG.name),
-            code_actions: !args.has_flag(WRITE_NO_CODE_ACTIONS_FLAG.name),
-        },
-    )
+    let name = args.first().map(str::to_string);
+    let options = WriteOptions {
+        force: false,
+        auto_format: !args.has_flag(WRITE_NO_FORMAT_FLAG.name),
+        code_actions: !args.has_flag(WRITE_NO_CODE_ACTIONS_FLAG.name),
+    };
+
+    // A file whose folder is not there is a question, never a write that fails quietly
+    // behind the buffer.
+    let target = match &name {
+        Some(name) => Some(helix_stdx::path::canonicalize(name)),
+        None => doc!(cx.editor).path().map(Path::to_path_buf),
+    };
+    if let Some(target) = target {
+        if !super::missing_folders(&[target.as_path()]).is_empty() {
+            super::make_folders_then(
+                vec![target],
+                Box::new(move |cx| {
+                    if let Err(err) = write_impl(cx, name.as_deref(), options) {
+                        cx.editor.set_error(format!("Error saving: {err}"));
+                    }
+                }),
+            );
+            return Ok(());
+        }
+    }
+
+    write_impl(cx, name.as_deref(), options)
 }
 
 fn force_write(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow::Result<()> {
