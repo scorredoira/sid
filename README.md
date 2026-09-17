@@ -456,6 +456,8 @@ sh /tmp/install-sid.sh
 
 To update, run `sid --update`, or **Check for updates** on the welcome screen: either
 installs the latest release beside the one running, and the next start is the new one.
+From the editor, **Restart now** starts it right away, asking first about anything
+unsaved, and opens again what was open.
 A build from source updates with `git pull` and `./build.sh` instead, and the portable
 `.run` file by downloading the new one.
 

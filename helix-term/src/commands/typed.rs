@@ -886,6 +886,7 @@ fn check_updates(
                         compositor.push(Box::new(ui::busy::Busy::new(UPDATE_BUSY, title)));
                     })
                     .await;
+                    let exe = crate::update::installed_binary(&prefix);
                     let installed = tokio::task::spawn_blocking(move || {
                         crate::update::install_latest(&prefix, true)
                     })
@@ -893,14 +894,23 @@ fn check_updates(
                     job::dispatch(move |_editor, compositor| {
                         compositor.remove(UPDATE_BUSY);
                         match installed {
-                            Ok(Ok(())) => tell(
-                                compositor,
-                                "sid is updated",
-                                vec![
+                            Ok(Ok(())) => {
+                                let lines = vec![
                                     format!("sid {latest} is installed."),
-                                    "Restart sid to use it.".to_string(),
-                                ],
-                            ),
+                                    "Restarting opens what is open now.".to_string(),
+                                ];
+                                let restart: ui::confirm::Choice =
+                                    Box::new(move |cx| super::restart_saving(cx, exe));
+                                let answers = vec![
+                                    ui::confirm::Answer::new("Restart now", restart),
+                                    ui::confirm::Answer::new("Later", Box::new(|_| {})),
+                                ];
+                                compositor.push(Box::new(ui::confirm::Confirm::new(
+                                    "sid is updated",
+                                    lines,
+                                    answers,
+                                )));
+                            }
                             Ok(Err(err)) => {
                                 tell(compositor, "The update failed", vec![format!("{err:#}")])
                             }

@@ -170,6 +170,56 @@ sh "$installer""#;
     Ok(())
 }
 
+/// The sid to start in place of this one once the editor has closed, when a restart into
+/// an update was asked for.
+static RESTART: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+/// The sid the installer put under `prefix`: the link the next start runs.
+pub fn installed_binary(prefix: &Path) -> PathBuf {
+    prefix.join("bin").join("sid")
+}
+
+/// Asks for `exe` to be started in place of this sid when the editor closes.
+pub fn restart_into(exe: PathBuf) {
+    *RESTART
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(exe);
+}
+
+/// The sid to start now that the editor has closed, if a restart was asked for.
+pub fn take_restart() -> Option<PathBuf> {
+    RESTART
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take()
+}
+
+/// Replaces this process with `exe`, given the same arguments and started from `dir`, the
+/// directory this sid was started from. It returns only when that could not be done.
+#[cfg(unix)]
+pub fn restart(exe: &Path, dir: Option<&Path>) -> std::io::Error {
+    use std::os::unix::process::CommandExt;
+    let mut command = Command::new(exe);
+    command.args(std::env::args_os().skip(1));
+    if let Some(dir) = dir {
+        command.current_dir(dir);
+    }
+    command.exec()
+}
+
+#[cfg(not(unix))]
+pub fn restart(exe: &Path, dir: Option<&Path>) -> std::io::Error {
+    let mut command = Command::new(exe);
+    command.args(std::env::args_os().skip(1));
+    if let Some(dir) = dir {
+        command.current_dir(dir);
+    }
+    match command.status() {
+        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+        Err(err) => err,
+    }
+}
+
 /// `sid --update`: installs the latest release if it is newer, and says what happened.
 pub fn run_from_command_line() -> anyhow::Result<i32> {
     let current = VERSION_AND_GIT_HASH;

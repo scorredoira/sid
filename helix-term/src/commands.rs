@@ -4589,6 +4589,50 @@ fn settings(_cx: &mut Context) {
 
 /// Ctrl-q: what can be written is written and the editor closes. What cannot — a buffer
 /// with no file — is a question, and it is asked in the middle of the screen.
+/// Closes the editor and starts `exe` in its place, asking first about what is unsaved,
+/// as quitting does: what was open comes back with the new sid.
+pub(crate) fn restart_saving(cx: &mut compositor::Context, exe: std::path::PathBuf) {
+    let unsaved = unsaved(cx.editor);
+    if unsaved.is_empty() {
+        crate::update::restart_into(exe);
+        run_typable(cx, "quit-all");
+        return;
+    }
+
+    job::dispatch_blocking(move |_editor, compositor| {
+        let verb = if unsaved.len() == 1 { "has" } else { "have" };
+        let lines = vec![
+            format!("{} {verb} changes.", unsaved.join(", ")),
+            "Nothing is written until you say so.".to_string(),
+        ];
+        let without_saving = exe.clone();
+        let answers = vec![
+            ui::confirm::Answer::new(
+                "Save and restart",
+                Box::new(move |cx: &mut compositor::Context| {
+                    crate::update::restart_into(exe);
+                    name_unsaveable_then(cx, Box::new(typed::write_all_and_quit))
+                }),
+            ),
+            ui::confirm::Answer::new(
+                "Restart without saving",
+                Box::new(move |cx: &mut compositor::Context| {
+                    crate::update::restart_into(without_saving);
+                    run_typable(cx, "quit-all!")
+                }),
+            )
+            .destructive(),
+            ui::confirm::Answer::new("Cancel", Box::new(|_| {})),
+        ];
+
+        compositor.push(Box::new(ui::confirm::Confirm::new(
+            "Unsaved changes",
+            lines,
+            answers,
+        )));
+    });
+}
+
 fn quit_saving(cx: &mut Context) {
     let unsaved = unsaved(cx.editor);
     if unsaved.is_empty() {

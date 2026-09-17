@@ -18,7 +18,17 @@ fn setup_logging(verbosity: u64) -> Result<()> {
 }
 
 fn main() -> Result<()> {
+    // Where sid was started from, before the arguments move into a project: a restart
+    // starts the new sid from here, where the same arguments mean the same files.
+    let started_in = std::env::current_dir().ok();
     let exit_code = main_impl()?;
+    if let Some(exe) = helix_term::update::take_restart() {
+        if exit_code == 0 {
+            let err = helix_term::update::restart(&exe, started_in.as_deref());
+            eprintln!("Could not start {}: {err}", exe.display());
+            std::process::exit(1);
+        }
+    }
     std::process::exit(exit_code);
 }
 
