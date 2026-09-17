@@ -21,6 +21,7 @@ use crate::{
 use helix_core::{
     diagnostic::NumberOrString,
     graphemes::{next_grapheme_boundary, prev_grapheme_boundary},
+    line_ending::line_end_char_index,
     movement::Direction,
     syntax::{self, OverlayHighlights},
     text_annotations::TextAnnotations,
@@ -80,6 +81,9 @@ pub struct EditorView {
     last_click: Option<Click>,
     /// What a drag after a double or a triple click extends by, from the unit clicked.
     drag_unit: Option<(ClickUnit, Range)>,
+    /// The button went down on the text and is still held: the mouse selects until it is
+    /// let go, wherever the pointer goes.
+    selecting: bool,
     /// Where the pointer rests.
     pointer: Option<(u16, u16)>,
     /// The pointer shape last asked of the terminal, so it is asked again only on a change.
@@ -237,6 +241,7 @@ impl EditorView {
             dragged_separator: None,
             last_click: None,
             drag_unit: None,
+            selecting: false,
             pointer: None,
             pointer_shape: None,
             pointer_moved_at: Arc::new(Mutex::new(Instant::now())),
@@ -1517,6 +1522,69 @@ impl EditorView {
         self.pseudo_pending.clear();
     }
 
+    /// Takes the selection being made with the mouse to the pointer. Off the text the
+    /// pointer counts as the nearest cell of the view, and above or below it as the line
+    /// past the edge, so a drag that leaves the view scrolls it.
+    fn drag_selection_to(
+        &mut self,
+        cxt: &mut commands::Context,
+        row: u16,
+        column: u16,
+    ) -> EventResult {
+        // A drag while typing selects, like Shift with an arrow does.
+        let _ = commands::mark_insert_selection(cxt.editor);
+        let typing = cxt.editor.mode == Mode::Insert;
+
+        let (view, doc) = current!(cxt.editor);
+        let inner = view.inner_area(doc);
+        if inner.width == 0 || inner.height == 0 {
+            return EventResult::Ignored(None);
+        }
+        let on_row = row.clamp(inner.top(), inner.bottom() - 1);
+        let on_column = column.clamp(inner.left(), inner.right() - 1);
+        let Some(mut pos) = view.pos_at_screen_coords(doc, on_row, on_column, false) else {
+            return EventResult::Ignored(None);
+        };
+
+        let text = doc.text().slice(..);
+        let line = text.char_to_line(pos);
+        let beyond = if row < inner.top() {
+            line.checked_sub(1)
+        } else if row >= inner.bottom() && line + 1 < text.len_lines() {
+            Some(line + 1)
+        } else {
+            None
+        };
+        if let Some(beyond) = beyond {
+            let offset = pos - text.line_to_char(line);
+            let start = text.line_to_char(beyond);
+            pos = (start + offset).min(line_end_char_index(&text, beyond));
+        }
+
+        let mut selection = doc.selection(view.id).clone();
+        let primary = selection.primary_mut();
+        *primary = match self.drag_unit {
+            // From the word or line clicked to the one under the pointer, whole.
+            Some((unit, origin)) => {
+                let here = unit_range(text, pos, unit);
+                if here.from() >= origin.from() {
+                    Range::new(origin.from(), here.to())
+                } else {
+                    Range::new(origin.to(), here.from())
+                }
+            }
+            // While typing the caret is a bar between two characters, as a click puts it:
+            // the selection runs from the boundary the button went down on to the one under
+            // the pointer, either way, and never takes the character past it as well.
+            None if typing => Range::new(primary.anchor, pos),
+            None => primary.put_cursor(text, pos, true),
+        };
+        doc.set_selection(view.id, selection);
+        let view_id = view.id;
+        cxt.editor.ensure_cursor_in_view(view_id);
+        EventResult::Consumed(None)
+    }
+
     fn handle_mouse_event(
         &mut self,
         event: &MouseEvent,
@@ -1547,6 +1615,25 @@ impl EditorView {
         }
 
         self.set_pointer_shape(row, column, cxt.editor);
+
+        // A drag that started on the text stays the text's: over the gutter, the tree, the
+        // tabs or past the edge of the screen, the selection follows the pointer, and where
+        // the button is let go is where it ends.
+        if self.selecting {
+            match kind {
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    return self.drag_selection_to(cxt, row, column);
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    self.selecting = false;
+                    self.drag_selection_to(cxt, row, column);
+                    return mouse_selection_done(cxt);
+                }
+                // A move with no button held: the release was never reported.
+                MouseEventKind::Moved | MouseEventKind::Down(_) => self.selecting = false,
+                _ => {}
+            }
+        }
 
         // A drag of the sidebar's separator stays the sidebar's when the mouse leaves it.
         if self.sidebar.contains(row, column) || self.sidebar.resizing() {
@@ -1754,6 +1841,7 @@ impl EditorView {
 
                 if let Some((pos, view_id)) = pos_and_view(editor, row, column, true) {
                     editor.focus(view_id);
+                    self.selecting = true;
                     self.last_click = Some(Click {
                         at: now,
                         row,
@@ -1836,36 +1924,7 @@ impl EditorView {
                 EventResult::Ignored(None)
             }
 
-            MouseEventKind::Drag(MouseButton::Left) => {
-                // A drag while typing selects, like Shift with an arrow does.
-                let _ = commands::mark_insert_selection(cxt.editor);
-
-                let (view, doc) = current!(cxt.editor);
-
-                let pos = match view.pos_at_screen_coords(doc, row, column, true) {
-                    Some(pos) => pos,
-                    None => return EventResult::Ignored(None),
-                };
-
-                let mut selection = doc.selection(view.id).clone();
-                let primary = selection.primary_mut();
-                *primary = match self.drag_unit {
-                    // From the word or line clicked to the one under the pointer, whole.
-                    Some((unit, origin)) => {
-                        let here = unit_range(doc.text().slice(..), pos, unit);
-                        if here.from() >= origin.from() {
-                            Range::new(origin.from(), here.to())
-                        } else {
-                            Range::new(origin.to(), here.from())
-                        }
-                    }
-                    None => primary.put_cursor(doc.text().slice(..), pos, true),
-                };
-                doc.set_selection(view.id, selection);
-                let view_id = view.id;
-                cxt.editor.ensure_cursor_in_view(view_id);
-                EventResult::Consumed(None)
-            }
+            MouseEventKind::Drag(MouseButton::Left) => self.drag_selection_to(cxt, row, column),
 
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                 let current_view = cxt.editor.tree.focus;
@@ -1890,36 +1949,7 @@ impl EditorView {
                 EventResult::Consumed(None)
             }
 
-            MouseEventKind::Up(MouseButton::Left) => {
-                if !config.middle_click_paste {
-                    return EventResult::Ignored(None);
-                }
-
-                let (view, doc) = current!(cxt.editor);
-
-                let should_yank = match cxt.editor.mouse_down_range.take() {
-                    Some(down_range) => doc.selection(view.id).primary() != down_range,
-                    None => {
-                        // This should not happen under normal cases. We fall back to the original
-                        // behavior of yanking on non-single-char selections.
-                        doc.selection(view.id)
-                            .primary()
-                            .slice(doc.text().slice(..))
-                            .len_chars()
-                            > 1
-                    }
-                };
-
-                if should_yank {
-                    commands::yank_main_selection_to_register(
-                        cxt.editor,
-                        config.mouse_yank_register,
-                    );
-                    EventResult::Consumed(None)
-                } else {
-                    EventResult::Ignored(None)
-                }
-            }
+            MouseEventKind::Up(MouseButton::Left) => mouse_selection_done(cxt),
 
             MouseEventKind::Up(MouseButton::Right) => {
                 if let Some((pos, view_id)) = gutter_coords_and_view(cxt.editor, row, column) {
@@ -2868,6 +2898,37 @@ fn arm_hover_timer(moved_at: Arc<Mutex<Instant>>) {
 }
 
 /// The word or the line at a position, as a double or a triple click takes it.
+/// The left button let go: what the mouse selected goes to the register a middle click
+/// pastes from, where that is on.
+fn mouse_selection_done(cxt: &mut commands::Context) -> EventResult {
+    let config = cxt.editor.config();
+    if !config.middle_click_paste {
+        return EventResult::Ignored(None);
+    }
+
+    let (view, doc) = current!(cxt.editor);
+
+    let should_yank = match cxt.editor.mouse_down_range.take() {
+        Some(down_range) => doc.selection(view.id).primary() != down_range,
+        None => {
+            // This should not happen under normal cases. We fall back to the original
+            // behavior of yanking on non-single-char selections.
+            doc.selection(view.id)
+                .primary()
+                .slice(doc.text().slice(..))
+                .len_chars()
+                > 1
+        }
+    };
+
+    if should_yank {
+        commands::yank_main_selection_to_register(cxt.editor, config.mouse_yank_register);
+        EventResult::Consumed(None)
+    } else {
+        EventResult::Ignored(None)
+    }
+}
+
 fn unit_range(text: helix_core::RopeSlice, pos: usize, unit: ClickUnit) -> Range {
     match unit {
         ClickUnit::Word => textobject_word(text, Range::point(pos), TextObject::Inside, 1, false),
