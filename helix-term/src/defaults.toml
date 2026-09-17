@@ -12,6 +12,8 @@ default-mode = "insert"
 restore-session = true
 bufferline = "always"
 color-modes = true
+# The caret blinks, as it does in every other editor.
+cursor-blink = true
 
 [editor.file-picker]
 git-ignore = false

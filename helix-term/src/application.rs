@@ -331,7 +331,8 @@ impl Application {
         self.editor.cursor_cache.reset();
 
         let pos = pos.map(|pos| (pos.col as u16, pos.row as u16));
-        self.terminal.draw(pos, kind).unwrap();
+        let blink = self.editor.config().cursor_blink;
+        self.terminal.draw(pos, kind, blink).unwrap();
     }
 
     pub async fn event_loop<S>(&mut self, input_stream: &mut S)
@@ -1351,7 +1352,7 @@ impl Application {
         ui::editor::write_pointer_shape("");
         self.terminal
             .backend_mut()
-            .show_cursor(CursorKind::Block)
+            .show_cursor(CursorKind::Block, false)
             .ok();
         self.terminal.restore()
     }

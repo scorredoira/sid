@@ -294,12 +294,15 @@ where
         queue!(self.buffer, Hide)
     }
 
-    fn show_cursor(&mut self, kind: CursorKind) -> io::Result<()> {
-        let shape = match kind {
-            CursorKind::Block => SetCursorStyle::SteadyBlock,
-            CursorKind::Bar => SetCursorStyle::SteadyBar,
-            CursorKind::Underline => SetCursorStyle::SteadyUnderScore,
-            CursorKind::Hidden => unreachable!(),
+    fn show_cursor(&mut self, kind: CursorKind, blink: bool) -> io::Result<()> {
+        let shape = match (kind, blink) {
+            (CursorKind::Block, false) => SetCursorStyle::SteadyBlock,
+            (CursorKind::Block, true) => SetCursorStyle::BlinkingBlock,
+            (CursorKind::Bar, false) => SetCursorStyle::SteadyBar,
+            (CursorKind::Bar, true) => SetCursorStyle::BlinkingBar,
+            (CursorKind::Underline, false) => SetCursorStyle::SteadyUnderScore,
+            (CursorKind::Underline, true) => SetCursorStyle::BlinkingUnderScore,
+            (CursorKind::Hidden, _) => unreachable!(),
         };
         queue!(self.buffer, Show, shape)
     }

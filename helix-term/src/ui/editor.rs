@@ -347,7 +347,9 @@ impl EditorView {
                 view,
                 theme,
                 &config.cursor_shape,
-                self.terminal_focused,
+                // A blinking block is the terminal's own cursor, since only the terminal
+                // blinks; a steady one is drawn here, in the theme's colours.
+                self.terminal_focused && !config.cursor_blink,
             ));
             if let Some(overlay) = Self::highlight_focused_view_elements(view, doc, theme) {
                 overlays.push(overlay);
@@ -2467,7 +2469,9 @@ impl Component for EditorView {
         match editor.cursor() {
             // all block cursors are drawn manually
             (pos, CursorKind::Block) => {
-                if self.terminal_focused {
+                if self.terminal_focused && editor.config().cursor_blink {
+                    (pos, CursorKind::Block)
+                } else if self.terminal_focused {
                     (pos, CursorKind::Hidden)
                 } else {
                     // use terminal cursor when terminal loses focus

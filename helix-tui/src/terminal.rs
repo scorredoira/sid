@@ -187,6 +187,7 @@ where
         &mut self,
         cursor_position: Option<(u16, u16)>,
         cursor_kind: CursorKind,
+        cursor_blink: bool,
     ) -> io::Result<()> {
         // // Autoresize - otherwise we get glitches if shrinking or potential desync between widgets
         // // and the terminal (if growing), which may OOB.
@@ -211,7 +212,7 @@ where
 
         match cursor_kind {
             CursorKind::Hidden => self.hide_cursor()?,
-            kind => self.show_cursor(kind)?,
+            kind => self.show_cursor(kind, cursor_blink)?,
         }
 
         self.backend.end_sync()?;
@@ -236,8 +237,8 @@ where
         Ok(())
     }
 
-    pub fn show_cursor(&mut self, kind: CursorKind) -> io::Result<()> {
-        self.backend.show_cursor(kind)?;
+    pub fn show_cursor(&mut self, kind: CursorKind, blink: bool) -> io::Result<()> {
+        self.backend.show_cursor(kind, blink)?;
         self.cursor_kind = kind;
         Ok(())
     }

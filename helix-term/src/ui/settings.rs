@@ -77,6 +77,16 @@ const SETTINGS: &[Setting] = &[
         kind: Kind::Switch,
     },
     Setting {
+        label: "The cursor while typing",
+        key: "cursor-shape.insert",
+        kind: Kind::Words(&["bar", "block", "underline"]),
+    },
+    Setting {
+        label: "The cursor blinks",
+        key: "cursor-blink",
+        kind: Kind::Switch,
+    },
+    Setting {
         label: "Highlight the line the cursor is on",
         key: "cursorline",
         kind: Kind::Switch,
@@ -430,6 +440,20 @@ mod tests {
         assert!(written.contains("mouse = true"));
         assert!(written.contains("line-number = \"relative\""));
         assert!(written.contains("[editor.soft-wrap]\nenable = false"));
+    }
+
+    #[test]
+    fn the_cursor_while_typing_is_a_setting_that_reads_back() {
+        let mut config = serde_json::json!(helix_view::editor::Config::default());
+        let at = config.pointer_mut("/cursor-shape/insert").unwrap();
+        *at = Value::String("block".to_string());
+        let config: helix_view::editor::Config = serde_json::from_value(config).unwrap();
+        assert_eq!(
+            config
+                .cursor_shape
+                .from_mode(helix_view::document::Mode::Insert),
+            helix_view::graphics::CursorKind::Block
+        );
     }
 
     #[test]

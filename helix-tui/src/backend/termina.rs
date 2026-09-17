@@ -570,12 +570,15 @@ impl Backend for TerminaBackend {
         write!(self.terminal, "{}", decreset!(ShowCursor))
     }
 
-    fn show_cursor(&mut self, kind: CursorKind) -> io::Result<()> {
-        let style = match kind {
-            CursorKind::Block => CursorStyle::SteadyBlock,
-            CursorKind::Bar => CursorStyle::SteadyBar,
-            CursorKind::Underline => CursorStyle::SteadyUnderline,
-            CursorKind::Hidden => unreachable!(),
+    fn show_cursor(&mut self, kind: CursorKind, blink: bool) -> io::Result<()> {
+        let style = match (kind, blink) {
+            (CursorKind::Block, false) => CursorStyle::SteadyBlock,
+            (CursorKind::Block, true) => CursorStyle::BlinkingBlock,
+            (CursorKind::Bar, false) => CursorStyle::SteadyBar,
+            (CursorKind::Bar, true) => CursorStyle::BlinkingBar,
+            (CursorKind::Underline, false) => CursorStyle::SteadyUnderline,
+            (CursorKind::Underline, true) => CursorStyle::BlinkingUnderline,
+            (CursorKind::Hidden, _) => unreachable!(),
         };
         write!(
             self.terminal,

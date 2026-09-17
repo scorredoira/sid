@@ -395,6 +395,8 @@ pub struct Config {
     pub statusline: StatusLineConfig,
     /// Shape for cursor in each mode
     pub cursor_shape: CursorShapeConfig,
+    /// Whether the terminal's cursor blinks. Defaults to `false`.
+    pub cursor_blink: bool,
     /// Set to `true` to override automatic detection of terminal truecolor support in the event of a false negative. Defaults to `false`.
     pub true_color: bool,
     /// Set to `true` to override automatic detection of terminal undercurl support in the event of a false negative. Defaults to `false`.
@@ -1234,6 +1236,7 @@ impl Default for Config {
             sidebar: SidebarConfig::default(),
             statusline: StatusLineConfig::default(),
             cursor_shape: CursorShapeConfig::default(),
+            cursor_blink: false,
             true_color: false,
             undercurl: false,
             search: SearchConfig::default(),

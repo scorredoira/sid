@@ -134,7 +134,7 @@ impl Backend for TestBackend {
         Ok(())
     }
 
-    fn show_cursor(&mut self, _kind: CursorKind) -> Result<(), io::Error> {
+    fn show_cursor(&mut self, _kind: CursorKind, _blink: bool) -> Result<(), io::Error> {
         self.cursor = true;
         Ok(())
     }

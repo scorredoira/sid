@@ -36,8 +36,8 @@ pub trait Backend {
         I: Iterator<Item = (u16, u16, &'a Cell)>;
     /// Hides the cursor
     fn hide_cursor(&mut self) -> Result<(), io::Error>;
-    /// Sets the cursor to the given shape
-    fn show_cursor(&mut self, kind: CursorKind) -> Result<(), io::Error>;
+    /// Sets the cursor to the given shape, blinking or steady
+    fn show_cursor(&mut self, kind: CursorKind, blink: bool) -> Result<(), io::Error>;
     /// Sets the cursor to the given position
     fn set_cursor(&mut self, x: u16, y: u16) -> Result<(), io::Error>;
     /// Clears the terminal
