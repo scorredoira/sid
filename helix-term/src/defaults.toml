@@ -81,6 +81,8 @@ C-R = "sidebar_reveal"
 "C-A-n" = "explorer_new"
 "C-A-r" = "explorer_rename"
 S-del = "explorer_delete"
+# Shift-Alt-R, as in VS Code: the selection in the system's file manager.
+A-R = "explorer_reveal"
 # The same without Shift, for the terminals where Ctrl-Shift-letter arrives as Ctrl-letter.
 C-e = "sidebar_focus"
 C-r = "sidebar_reveal"

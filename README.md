@@ -87,9 +87,11 @@ selected, or on the file you are editing when no tree is on screen:
 that would leave the project is refused), `Ctrl-Alt-r` renames, and
 `Shift-Delete` deletes. With the focus in the tree `Delete` deletes too, since
 there is no text there for it to take a character from. The right button offers
-the same on the row it lands on. Deleting closes what the file had open, unsaved
-changes and all — the confirmation says so — so a deleted file stays deleted
-instead of being written back by the next save.
+the same on the row it lands on, and — on a machine with a desktop, not over
+SSH — shows it in the system's file manager, as `Shift-Alt-r` does. Deleting
+closes what the file had open, unsaved changes and all — the confirmation says
+so — so a deleted file stays deleted instead of being written back by the next
+save.
 
 A click shows a file and leaves you in the tree, so the tree's keys keep working
 while you look around; a double click, or `Enter`, opens it and takes you to the
@@ -307,6 +309,7 @@ So the keys are the ones you already know:
 | `Ctrl-b` / `Ctrl-e` / `Ctrl-r` | The sidebar: show or hide / focus / reveal this file |
 | `Ctrl-Alt-o` | The outline of this file's functions and types, under the tree |
 | `Ctrl-Alt-n` / `Ctrl-Alt-r` / `Shift-Delete` | The file tree's selection: create beside it / rename it / delete it, wherever the focus is |
+| `Shift-Alt-r` | Show the file tree's selection in the system's file manager — Finder, Explorer, or the desktop's own |
 | `Shift-F11` | Collapse every directory of the file tree, wherever the focus is |
 | `Shift-F5` | Check for a newer release of sid, and install it if you say so |
 | `Ctrl-PageUp` / `Ctrl-PageDown` | The tab before / after this one |

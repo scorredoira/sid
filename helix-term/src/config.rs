@@ -295,6 +295,7 @@ mod tests {
             assert_eq!(command_at(&config, mode, &["C-A-n"]), "explorer_new");
             assert_eq!(command_at(&config, mode, &["C-A-r"]), "explorer_rename");
             assert_eq!(command_at(&config, mode, &["S-del"]), "explorer_delete");
+            assert_eq!(command_at(&config, mode, &["A-R"]), "explorer_reveal");
             assert_eq!(
                 command_at(&config, mode, &["C-o"]),
                 "lsp_or_syntax_symbol_picker"

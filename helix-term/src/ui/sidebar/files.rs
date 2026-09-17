@@ -627,6 +627,127 @@ pub fn delete_dialog(
     Some(Box::new(Confirm::new("Confirm deletion", lines, answers)))
 }
 
+/// Whether there is a desktop to show a folder on. A Mac or Windows reached over SSH has
+/// one, but not on the screen of whoever is typing; elsewhere a desktop is a display.
+pub fn has_desktop() -> bool {
+    let set = |name: &str| std::env::var_os(name).is_some_and(|value| !value.is_empty());
+    if cfg!(any(target_os = "macos", windows)) {
+        return !set("SSH_CONNECTION") && !set("SSH_TTY");
+    }
+    set("WAYLAND_DISPLAY") || set("DISPLAY")
+}
+
+/// What revealing is called where sid runs, as each system's own editors call it.
+pub fn reveal_label() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Reveal in Finder"
+    } else if cfg!(windows) {
+        "Reveal in File Explorer"
+    } else {
+        "Open in the file manager"
+    }
+}
+
+/// Shows `path` in the system's file manager, selected in its folder where the system
+/// can do that. The file manager is started off the main thread; what went wrong lands
+/// in the status line.
+pub fn reveal(editor: &mut Editor, path: PathBuf) {
+    if !has_desktop() {
+        editor.set_error("There is no desktop here to open a file manager on");
+        return;
+    }
+    ui::editor::background(
+        move || open_file_manager(&path),
+        |editor, _view, opened: Result<(), String>| {
+            if let Err(err) = opened {
+                editor.set_error(err);
+            }
+        },
+    );
+}
+
+/// Runs a program with nothing of the terminal's, so what it prints never lands on the
+/// screen sid draws, and tells whether it went well.
+#[cfg(not(windows))]
+fn quietly(program: &str, args: &[&std::ffi::OsStr]) -> Result<bool, String> {
+    std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .map_err(|err| format!("{program}: {err}"))
+}
+
+#[cfg(target_os = "macos")]
+fn open_file_manager(path: &Path) -> Result<(), String> {
+    match quietly("open", &["-R".as_ref(), path.as_os_str()])? {
+        true => Ok(()),
+        false => Err(format!("Finder could not show {}", path.display())),
+    }
+}
+
+#[cfg(windows)]
+fn open_file_manager(path: &Path) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    // Explorer reads its own command line, quotes and all, and answers failure even when
+    // it opened: it is started, and not asked how it went.
+    std::process::Command::new("explorer")
+        .raw_arg(format!("/select,\"{}\"", path.display()))
+        .spawn()
+        .map(|_| ())
+        .map_err(|err| format!("explorer: {err}"))
+}
+
+/// The desktop's file manager selects the entry when it answers the freedesktop call for
+/// it; when none does, the folder is opened with whatever opens folders.
+#[cfg(not(any(target_os = "macos", windows)))]
+fn open_file_manager(path: &Path) -> Result<(), String> {
+    let item = format!("array:string:{}", file_uri(path));
+    let shown = quietly(
+        "dbus-send",
+        &[
+            "--session".as_ref(),
+            "--print-reply".as_ref(),
+            "--reply-timeout=5000".as_ref(),
+            "--dest=org.freedesktop.FileManager1".as_ref(),
+            "/org/freedesktop/FileManager1".as_ref(),
+            "org.freedesktop.FileManager1.ShowItems".as_ref(),
+            item.as_ref(),
+            "string:".as_ref(),
+        ],
+    );
+    if shown == Ok(true) {
+        return Ok(());
+    }
+
+    let folder = if path.is_dir() {
+        path
+    } else {
+        path.parent().unwrap_or(path)
+    };
+    match quietly("xdg-open", &[folder.as_os_str()])? {
+        true => Ok(()),
+        false => Err(format!("No file manager could open {}", folder.display())),
+    }
+}
+
+/// `path` as a file:// URI, every byte that is not plainly safe in one escaped.
+#[cfg(not(any(target_os = "macos", windows)))]
+fn file_uri(path: &Path) -> String {
+    use std::os::unix::ffi::OsStrExt;
+    let mut uri = String::from("file://");
+    for &byte in path.as_os_str().as_bytes() {
+        if byte.is_ascii_alphanumeric() || b"/-_.~".contains(&byte) {
+            uri.push(byte as char);
+        } else {
+            uri.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    uri
+}
+
 /// Where `name`, as typed in a prompt, lands below `root`. A name may go into
 /// subdirectories, made on the way; it may not leave the project, by being absolute or by
 /// climbing with `..`.

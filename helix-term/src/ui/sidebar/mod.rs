@@ -1445,8 +1445,9 @@ fn open_menu(
         let for_rename = target.clone();
         let for_delete = target.clone();
         let to_copy = target.path.clone();
+        let to_reveal = target;
 
-        let entries = vec![
+        let mut entries = vec![
             context_menu::Entry::new(
                 "New file or folder",
                 "Ctrl-Alt-n",
@@ -1499,20 +1500,31 @@ fn open_menu(
                     }
                 }),
             ),
-            context_menu::Entry::new(
-                if outline {
-                    "Hide the outline"
-                } else {
-                    "Show the outline"
-                },
-                "Ctrl-Alt-o",
-                Box::new(|compositor, cx| {
-                    if let Some(view) = compositor.find::<editor::EditorView>() {
-                        view.sidebar.toggle_outline(cx.editor);
-                    }
-                }),
-            ),
         ];
+        // Only where there is a desktop to open it on: over SSH it would open nowhere.
+        if files::has_desktop() {
+            entries.push(context_menu::Entry::new(
+                files::reveal_label(),
+                "Alt-Shift-r",
+                Box::new(move |_compositor, cx| {
+                    let path = to_reveal.path.unwrap_or(to_reveal.root);
+                    files::reveal(cx.editor, path);
+                }),
+            ));
+        }
+        entries.extend([context_menu::Entry::new(
+            if outline {
+                "Hide the outline"
+            } else {
+                "Show the outline"
+            },
+            "Ctrl-Alt-o",
+            Box::new(|compositor, cx| {
+                if let Some(view) = compositor.find::<editor::EditorView>() {
+                    view.sidebar.toggle_outline(cx.editor);
+                }
+            }),
+        )]);
 
         compositor.push(Box::new(context_menu::ContextMenu::new(
             (row, column),

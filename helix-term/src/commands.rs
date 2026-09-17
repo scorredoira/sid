@@ -435,6 +435,7 @@ impl MappableCommand {
         explorer_new, "Create a file or folder next to the file tree's selection",
         explorer_rename, "Rename the file tree's selection",
         explorer_delete, "Delete the file tree's selection, after confirmation",
+        explorer_reveal, "Show the file tree's selection, or the current file, in the system's file manager",
         markdown_preview_toggle, "Show or hide the Markdown preview beside the file",
         markdown_preview_full, "Show or hide the Markdown preview on its own, filling the screen",
         quit_saving, "Save every file that has one and quit, asking about what cannot be saved",
@@ -4394,6 +4395,16 @@ fn explorer_rename(_cx: &mut Context) {
 
 fn explorer_delete(_cx: &mut Context) {
     explorer_dialog(ui::sidebar::files::delete_dialog);
+}
+
+fn explorer_reveal(_cx: &mut Context) {
+    job::dispatch_blocking(|editor, compositor| {
+        let Some(editor_view) = compositor.find::<ui::EditorView>() else {
+            return;
+        };
+        let target = editor_view.sidebar.target_anywhere(editor);
+        ui::sidebar::files::reveal(editor, target.path.unwrap_or(target.root));
+    });
 }
 
 /// Runs a typable command as if it had been typed, for the few places that stand in for
