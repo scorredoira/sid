@@ -93,18 +93,19 @@ closes what the file had open, unsaved changes and all — the confirmation says
 so — so a deleted file stays deleted instead of being written back by the next
 save.
 
-A click shows a file and leaves you in the tree, so the tree's keys keep working
-while you look around; a double click, or `Enter`, opens it and takes you to the
-code. The wheel scrolls, and dragging the line between the tree and the editor
-resizes it: the width is remembered.
+A click opens a file and the typing goes to it: a click never takes the keyboard
+from the text, and a click on the text always gives it back. The tree has the
+keys only when `Ctrl-e` or `Ctrl-r` asks for them, until `Esc`, `Enter`, or a
+click on a file or on the text. The wheel scrolls, and dragging the line between
+the tree and the editor resizes it: the width is remembered.
 
 `Ctrl-Alt-o` opens an **outline** under the tree: the functions, types and
 classes of the file you are editing. A running language server says what the
 file defines, every kind of thing it knows; without one the syntax tree does,
 so it works for every language sid highlights with nothing installed. Either
-way it follows what you type. A click goes to the definition and leaves you in the outline;
-`Enter` or a double click takes you to the code. The one your cursor is inside
-is bold, and the outline follows the cursor as the tree follows the file.
+way it follows what you type. A click, or `Enter`, goes to the definition. The
+one your cursor is inside is bold, and the outline follows the cursor as the
+tree follows the file.
 The rule between the two says `by position` or `by name`: a click on it turns
 the order over, and dragging the rest of it resizes the panes. `Alt-↑` and
 `Alt-↓` move the focus between the tree and the outline, and typing walks the

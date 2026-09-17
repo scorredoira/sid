@@ -185,7 +185,7 @@ impl Outline {
 
     /// Reads the definitions again when the file being edited changed, or was edited,
     /// and marks the one the cursor is inside; run at every render while on screen.
-    pub fn sync(&mut self, editor: &mut Editor) {
+    pub fn sync(&mut self, editor: &mut Editor, keys_here: bool) {
         let doc = doc_mut!(editor);
         let key = (doc.id(), doc.get_current_revision());
         if self.read_from != Some(key) && self.wanted != Some(key) {
@@ -232,9 +232,9 @@ impl Outline {
             .map(|(index, _)| index);
         if current != self.current {
             self.current = current;
-            // Without the focus the outline follows the cursor, as the tree follows the
-            // file; with it the cursor in the list is yours.
-            if let Some(index) = current.filter(|_| !self.focused) {
+            // Without the keys the outline follows the cursor, as the tree follows the
+            // file; with them the cursor in the list is yours.
+            if let Some(index) = current.filter(|_| !keys_here) {
                 self.list.select(index);
             }
         }
@@ -474,12 +474,12 @@ impl TabView for Outline {
     fn refresh(&mut self, cx: &mut TabContext) {
         self.read_from = None;
         self.wanted = None;
-        self.sync(cx.editor);
+        self.sync(cx.editor, self.focused);
     }
 
-    /// Goes to the definition under the cursor: a click leaves you in the outline, so
-    /// its keys keep working; Enter takes you to the code.
-    fn open(&mut self, cx: &mut TabContext, how: Activation) -> Outcome {
+    /// Goes to the definition under the cursor, and the typing goes there with it, by a
+    /// click or by Enter.
+    fn open(&mut self, cx: &mut TabContext, _how: Activation) -> Outcome {
         let Some(Row::Symbol(symbol)) = self.rows.get(self.list.cursor) else {
             return Outcome::Stay;
         };
@@ -493,10 +493,7 @@ impl TabView for Outline {
         push_jump(view, doc);
         doc.set_selection(view.id, Selection::point(start));
         align_view(doc, view, Align::Center);
-        match how {
-            Activation::Click => Outcome::Stay,
-            Activation::Enter => Outcome::Leave,
-        }
+        Outcome::Leave
     }
 }
 

@@ -258,7 +258,7 @@ impl Sidebar {
     }
 
     /// Hides the outline when it is on screen; otherwise brings the tree on screen with
-    /// the outline under it, and the keys in the outline.
+    /// the outline under it. The keys stay in the text: Ctrl-E takes them to the outline.
     pub fn toggle_outline(&mut self, editor: &mut Editor) {
         if self.outline_visible() {
             self.outline.set_shown(false);
@@ -269,9 +269,7 @@ impl Sidebar {
         }
         self.show_files(editor);
         self.outline.set_shown(true);
-        self.focused = true;
-        self.outline.focused = true;
-        self.outline.sync(editor);
+        self.outline.sync(editor, false);
     }
 
     /// A language server answered the outline's question about a file.
@@ -1019,7 +1017,6 @@ impl Sidebar {
             }
             // The outline's own menu: the order, and a way to put it away.
             MouseEventKind::Down(MouseButton::Right) if self.outline.focused => {
-                self.focused = true;
                 let pane = self.active_area();
                 if event.row > pane.y {
                     let line = (event.row - pane.y) as usize;
@@ -1031,7 +1028,6 @@ impl Sidebar {
             }
             // The right button takes the row it lands on and offers what can be done to it.
             MouseEventKind::Down(MouseButton::Right) if self.active().edits_disk() => {
-                self.focused = true;
                 let line = event.row.saturating_sub(self.area.y) as usize;
                 if line > 0 {
                     if let Some(index) = self.active().list().row_at(line - 1) {
@@ -1051,7 +1047,6 @@ impl Sidebar {
                 );
             }
             MouseEventKind::Down(MouseButton::Right) if self.tab == TabKind::Changes => {
-                self.focused = true;
                 let line = event.row.saturating_sub(self.area.y) as usize;
                 if line > 0 {
                     if let Some(index) = self.active().list().row_at(line - 1) {
@@ -1064,8 +1059,13 @@ impl Sidebar {
 
                 return open_changes_menu(event.row, event.column, self.root.clone(), file);
             }
+            // A click never takes the keyboard from the text: the row is shown and chosen,
+            // and typing still types. The sidebar has the keys only when asked by a key of
+            // its own, Ctrl-E or Ctrl-R, or when there is no code on screen to type into.
             MouseEventKind::Down(MouseButton::Left) => {
-                self.focused = true;
+                if self.code_hidden() {
+                    self.focused = true;
+                }
                 // The first line holds the tabs, not a row.
                 let line = event.row.saturating_sub(self.area.y) as usize;
                 if line == 0 {
@@ -1102,13 +1102,8 @@ impl Sidebar {
                     Activation::Click
                 };
                 if self.open_row(editor, how) {
-                    self.code_hidden = false;
-                    // A single click on a file shows it but leaves you in the tree, so the
-                    // tree's own keys keep working while you look around; a double click,
-                    // or Enter, is what says you are done here and takes you to the code.
-                    if double || self.tab != TabKind::Files {
-                        self.focused = false;
-                    }
+                    // What opened is where the typing goes, even when the tree had the keys.
+                    self.focus_code();
                 }
             }
             MouseEventKind::ScrollDown => {
@@ -1209,7 +1204,8 @@ impl Sidebar {
             self.reveal_current(editor);
         }
         if self.outline_visible() {
-            self.outline.sync(editor);
+            let keys_here = self.focused && self.outline.focused;
+            self.outline.sync(editor, keys_here);
         }
 
         let theme = &editor.theme;

@@ -1553,6 +1553,12 @@ impl EditorView {
             return self.sidebar.handle_mouse(event, cxt);
         }
 
+        // A press anywhere outside the sidebar gives the keys back to the text: whatever
+        // had them, what is typed next is typed into the file.
+        if matches!(kind, MouseEventKind::Down(_)) && self.sidebar.focused {
+            self.sidebar.focus_code();
+        }
+
         // A drag of the preview's separator stays the preview's when the mouse leaves it.
         if self.markdown_preview.contains(row, column) || self.markdown_preview.resizing() {
             return self.markdown_preview.handle_mouse(event, cxt);
