@@ -103,6 +103,10 @@ C-S = "save_as"
 # Comment is Ctrl-/, which on a Spanish keyboard is the 7 key, with or without shift.
 C-7 = "toggle_comments"
 C-S-7 = "toggle_comments"
+# Terminals that report keys in full send Ctrl-/ as itself, on any keyboard.
+"C-/" = "toggle_comments"
+# Shift-Alt-A, as in VS Code, comments the selection as a block.
+A-A = "toggle_block_comments"
 # Ctrl-] and Ctrl-\ ask for Alt on that keyboard too: they are the + and º keys.
 "C-A-+" = "indent"
 "C-A-º" = "vsplit"

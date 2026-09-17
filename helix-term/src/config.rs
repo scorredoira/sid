@@ -364,6 +364,8 @@ mod tests {
             );
             assert_eq!(command_at(&config, mode, &["C-K"]), "delete_line");
             assert_eq!(command_at(&config, mode, &["C-7"]), "toggle_comments");
+            assert_eq!(command_at(&config, mode, &["C-/"]), "toggle_comments");
+            assert_eq!(command_at(&config, mode, &["A-A"]), "toggle_block_comments");
             assert_eq!(command_at(&config, mode, &["C-w"]), "buffer-close");
             assert_eq!(command_at(&config, mode, &["C-S"]), "save_as");
             assert_eq!(command_at(&config, mode, &["C-s"]), "write");

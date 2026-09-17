@@ -289,7 +289,7 @@ So the keys are the ones you already know:
 | `Ctrl-Shift-d` / `Ctrl-Shift-k` | Duplicate / delete the line |
 | `Ctrl` + `↑` / `↓` | Move the line up or down |
 | `Ctrl-Shift` + `↑` / `↓` | Grow the selection to the enclosing code, and back |
-| `Ctrl-/` | Comment, or uncomment |
+| `Ctrl-/` / `Shift-Alt-a` | Comment, or uncomment / as a block |
 | `Tab` / `Shift-Tab` | Indent, or unindent |
 | `Ctrl-n` / `Ctrl-w` / `Shift-F4` | A new buffer / close this one / close them all |
 | `Ctrl-s` / `Ctrl-Shift-s` | Save / save under a name |
@@ -328,7 +328,8 @@ own menus.
 
 Where a keyboard puts `/`, `\` or `]` behind another key — a Spanish layout does
 — the editor sees the key that was actually pressed, so `Ctrl-/` is bound to the
-`7` key and `Ctrl-\` to `º`. Everything is in `defaults.toml`, laid under your
+`7` key and `Ctrl-\` to `º` — and to `/` itself, for the terminals that report it
+by the character it types. Everything is in `defaults.toml`, laid under your
 own `config.toml` — and a key meant for every mode is written once, under
 `[keys.all]`, in that file and in yours alike; a mode's own table wins over it.
 
