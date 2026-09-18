@@ -34,7 +34,7 @@ use helix_view::{
     annotations::diagnostics::DiagnosticFilter,
     document::Mode,
     editor::{CloseError, CompleteAction, CursorShapeConfig},
-    graphics::{Color, CursorKind, Modifier, Rect, Style, UnderlineStyle},
+    graphics::{Color, CursorKind, Margin, Modifier, Rect, Style, UnderlineStyle},
     input::{KeyEvent, MouseButton, MouseEvent, MouseEventKind},
     keyboard::{KeyCode, KeyModifiers},
     tree::Separator,
@@ -418,8 +418,11 @@ impl EditorView {
             }
         }
 
+        // The box waits for the caret to settle, as the message written between the lines
+        // used to: it does not flash past while the caret crosses the line.
         if config.inline_diagnostics.disabled()
             && config.end_of_line_diagnostics == DiagnosticFilter::Disable
+            && enable_cursor_line
         {
             Self::render_diagnostics(doc, view, inner, surface, theme);
         }
@@ -1098,6 +1101,10 @@ impl EditorView {
         }
     }
 
+    /// What is wrong with the line the caret is on, in a box floating over the code under
+    /// it — over the code above it when there is no room below. It is drawn ON the text
+    /// and never inside it: nothing in the file moves because the caret landed on a
+    /// mistake, and what was under the pointer is one keystroke or one move away again.
     pub fn render_diagnostics(
         doc: &Document,
         view: &View,
@@ -1107,58 +1114,112 @@ impl EditorView {
     ) {
         use helix_core::diagnostic::Severity;
         use tui::{
-            layout::Alignment,
             text::Text,
-            widgets::{Paragraph, Widget, Wrap},
+            widgets::{Block, Paragraph, Widget},
         };
 
-        let cursor = doc
-            .selection(view.id)
-            .primary()
-            .cursor(doc.text().slice(..));
+        if viewport.width < 16 || viewport.height < 4 {
+            return;
+        }
 
-        let diagnostics = doc.diagnostics().iter().filter(|diagnostic| {
-            diagnostic.range.start <= cursor && diagnostic.range.end >= cursor
-        });
+        let text = doc.text().slice(..);
+        let cursor = doc.selection(view.id).primary().cursor(text);
+        let cursor_line = text.char_to_line(cursor);
 
-        let warning = theme.get("warning");
-        let error = theme.get("error");
-        let info = theme.get("info");
-        let hint = theme.get("hint");
+        // Only what is worth interrupting the reading of the file for: a hint is told by
+        // the underline under it and by resting the pointer on it.
+        let diagnostics: Vec<_> = doc
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.line == cursor_line
+                    && matches!(
+                        diagnostic.severity,
+                        Some(Severity::Error) | Some(Severity::Warning) | None
+                    )
+            })
+            .collect();
+        if diagnostics.is_empty() {
+            return;
+        }
 
-        let mut lines = Vec::new();
-        let background_style = theme.get("ui.background");
+        let Some(position) = view.screen_coords_at_pos(doc, text, cursor) else {
+            return;
+        };
+
+        let max_width = 72.min(viewport.width.saturating_sub(2)) as usize;
+        // The box is the text plus a space and a border on each side.
+        let content_width = max_width.saturating_sub(4);
+        let mut lines: Vec<Span> = Vec::new();
         for diagnostic in diagnostics {
-            let style = Style::reset()
-                .patch(background_style)
-                .patch(match diagnostic.severity {
-                    Some(Severity::Error) => error,
-                    Some(Severity::Warning) | None => warning,
-                    Some(Severity::Info) => info,
-                    Some(Severity::Hint) => hint,
-                });
-            let text = Text::styled(&diagnostic.message, style);
-            lines.extend(text.lines);
-            let code = diagnostic.code.as_ref().map(|x| match x {
-                NumberOrString::Number(n) => format!("({n})"),
-                NumberOrString::String(s) => format!("({s})"),
+            let style = theme.get(match diagnostic.severity {
+                Some(Severity::Error) => "error",
+                Some(Severity::Warning) | None => "warning",
+                Some(Severity::Info) => "info",
+                Some(Severity::Hint) => "hint",
             });
-            if let Some(code) = code {
-                let span = Span::styled(code, style);
-                lines.push(span.into());
+            let code = match diagnostic.code.as_ref() {
+                Some(NumberOrString::Number(n)) => format!(" ({n})"),
+                Some(NumberOrString::String(s)) => format!(" ({s})"),
+                None => String::new(),
+            };
+            let message = format!("{}{code}", diagnostic.message.replace('\n', " "));
+            for line in wrap_to_width(&message, content_width) {
+                lines.push(Span::styled(line, style));
             }
         }
 
-        let text = Text::from(lines);
-        let paragraph = Paragraph::new(&text)
-            .alignment(Alignment::Right)
-            .wrap(Wrap { trim: true });
-        let width = 100.min(viewport.width);
-        let height = 15.min(viewport.height);
-        paragraph.render(
-            Rect::new(viewport.right() - width, viewport.y + 1, width, height),
-            surface,
-        );
+        // Under the caret when it fits there, over it when it does not, and on the side
+        // with the most room when neither holds it whole. Eight rows at most: past that
+        // the box hides more of the file than the message is worth, and all of it is one
+        // rest of the pointer away.
+        let caret_row = viewport.y + position.row as u16;
+        let under = viewport.bottom().saturating_sub(caret_row + 1);
+        let over = caret_row.saturating_sub(viewport.y);
+        let room = under.max(over);
+        // Under three rows there is no box to draw: a border, a line and a border.
+        if room < 3 {
+            return;
+        }
+
+        let height = ((lines.len().min(8) + 2) as u16).min(room);
+        let rows = height as usize - 2;
+        if lines.len() > rows {
+            lines.truncate(rows);
+            // What did not fit is still one rest of the pointer away.
+            if let Some(last) = lines.last_mut() {
+                let style = last.style;
+                *last = Span::styled(format!("{}…", last.content), style);
+            }
+        }
+        let width = lines
+            .iter()
+            .map(|line| line.content.width())
+            .max()
+            .unwrap_or(0) as u16
+            + 4;
+
+        // The line the caret is on is never covered, whichever way the box goes.
+        let y = if height <= under {
+            caret_row + 1
+        } else {
+            caret_row - height
+        };
+        let x = (viewport.x + position.col as u16).min(viewport.right().saturating_sub(width));
+        let area = viewport.intersection(Rect::new(x, y, width, height));
+
+        let popup_style = theme.get("ui.popup");
+        surface.clear_with(area, popup_style);
+        let block = Block::bordered().border_style(popup_style);
+        let inner = block.inner(area).inner(Margin::horizontal(1));
+        block.render(area, surface);
+        Paragraph::new(&Text::from(
+            lines
+                .into_iter()
+                .map(tui::text::Spans::from)
+                .collect::<Vec<_>>(),
+        ))
+        .render(inner, surface);
     }
 
     /// Apply the highlighting on the lines where a cursor is active
@@ -2931,6 +2992,41 @@ fn mouse_selection_done(cxt: &mut commands::Context) -> EventResult {
     } else {
         EventResult::Ignored(None)
     }
+}
+
+/// A message cut into lines no wider than `width`, breaking between words where it can and
+/// inside one only when a single word is wider than the box.
+fn wrap_to_width(message: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in message.split_whitespace() {
+        if line.is_empty() {
+            line.push_str(word);
+        } else if line.width() + 1 + word.width() <= width {
+            line.push(' ');
+            line.push_str(word);
+        } else {
+            lines.push(take(&mut line));
+            line.push_str(word);
+        }
+        while line.width() > width {
+            let mut cut = String::new();
+            let mut rest = String::new();
+            for ch in line.chars() {
+                if cut.width() + ch.to_string().width() <= width {
+                    cut.push(ch);
+                } else {
+                    rest.push(ch);
+                }
+            }
+            lines.push(cut);
+            line = rest;
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
 }
 
 fn unit_range(text: helix_core::RopeSlice, pos: usize, unit: ClickUnit) -> Range {

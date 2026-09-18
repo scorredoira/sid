@@ -67,7 +67,7 @@
 | `popup-border` | Draw border around `popup`, `menu`, `all`, or `none` | `"none"` |
 | `indent-heuristic` | How the indentation for a newly inserted line is computed: `simple` just copies the indentation level from the previous line, `tree-sitter` computes the indentation based on the syntax tree and `hybrid` combines both approaches. If the chosen heuristic is not available, a different one will be used as a fallback (the fallback order being `hybrid` -> `tree-sitter` -> `simple`). | `"hybrid"` |
 | `jump-label-alphabet` | The characters that are used to generate two character jump labels. Characters at the start of the alphabet are used first. | `"abcdefghijklmnopqrstuvwxyz"` |
-| `end-of-line-diagnostics` | Minimum severity of diagnostics to render at the end of the line. Set to `disable` to disable entirely. Refer to the setting about `inline-diagnostics` for more details | `"hint"` |
+| `end-of-line-diagnostics` | Minimum severity of diagnostics to render at the end of the line. Set to `disable` to disable entirely. Refer to the setting about `inline-diagnostics` for more details | `"disable"` |
 | `clipboard-provider` | Which API to use for clipboard interaction. One of `pasteboard` (MacOS), `wayland`, `x-clip`, `x-sel`, `win32-yank`, `termux`, `tmux`, `windows`, `termcode`, `none`, or a custom command set. | Platform and environment specific. |
 | `editor-config` | Whether to read settings from [EditorConfig](https://editorconfig.org) files | `true` |
 | `rainbow-brackets` | Whether to render rainbow colors for matching brackets. Requires tree-sitter `rainbows.scm` queries for the language. | `false` |
@@ -506,6 +506,11 @@ S-tab = "extend_parent_node_start"
 
 ### `[editor.inline-diagnostics]` Section
 
+Off by default: what a language server has to say about the line the cursor is on is
+drawn in a box floating over the code below it, so that nothing in the file moves when a
+diagnostic appears or goes away. Turning these options on writes the message between the
+lines instead, as shown below, which pushes the rest of the file down.
+
 Options for rendering diagnostics inside the text like shown below
 
 ```text
@@ -517,7 +522,7 @@ fn main() {
 
 | Key        | Description | Default |
 |------------|-------------|---------|
-| `cursor-line` | The minimum severity that a diagnostic must have to be shown inline on the line that contains the primary cursor. Set to `disable` to not show any diagnostics inline. This option does not have any effect when in insert-mode and will only take effect 350ms after moving the cursor to a different line. | `"warning"` |
+| `cursor-line` | The minimum severity that a diagnostic must have to be shown inline on the line that contains the primary cursor. Set to `disable` to not show any diagnostics inline. This option does not have any effect when in insert-mode and will only take effect 350ms after moving the cursor to a different line. | `"disable"` |
 | `other-lines` | The minimum severity that a diagnostic must have to be shown inline on a line that does not contain the cursor-line. Set to `disable` to not show any diagnostics inline. | `"disable"` |
 | `prefix-len` | How many horizontal bars `─` are rendered before the diagnostic text.  | `1` |
 | `max-wrap` | Equivalent of the `editor.soft-wrap.max-wrap` option for diagnostics.  | `20` |

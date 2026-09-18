@@ -109,7 +109,10 @@ impl InlineDiagnosticsConfig {
 impl Default for InlineDiagnosticsConfig {
     fn default() -> Self {
         InlineDiagnosticsConfig {
-            cursor_line: DiagnosticFilter::Enable(Severity::Warning),
+            // Nothing is written between the lines of the file: a message that takes a row
+            // pushes everything under it down, and the text must never move because the
+            // caret landed on a mistake. The message floats over the code instead.
+            cursor_line: DiagnosticFilter::Disable,
             other_lines: DiagnosticFilter::Disable,
             min_diagnostic_width: 40,
             prefix_len: 1,
