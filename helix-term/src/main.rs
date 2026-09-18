@@ -84,7 +84,7 @@ FLAGS:
     }
 
     if args.display_version {
-        println!("sid {} (a fork of Helix)", VERSION_AND_GIT_HASH);
+        println!("sid {} (a fork of Helix)", helix_term::version::describe());
         std::process::exit(0);
     }
 

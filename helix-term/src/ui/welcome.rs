@@ -111,10 +111,10 @@ impl Welcome {
             *y += 1;
         };
 
-        let version = helix_loader::VERSION_AND_GIT_HASH;
+        let version = crate::version::describe();
         line(&mut y, &mut |y| {
             surface.set_string(x, y, "sid", letters.add_modifier(Modifier::BOLD));
-            surface.set_stringn(x + 4, y, version, (width as usize).saturating_sub(4), dim);
+            surface.set_stringn(x + 4, y, &version, (width as usize).saturating_sub(4), dim);
         });
         y += 1;
 

@@ -553,7 +553,10 @@ and restart sid.** A change only to documentation needs no rebuild.
 
 To know which build you are running, `Shift-F1` shows it at the top right and
 `sid --version` prints it: `v2026.9.17` is that release, `v2026.9.17+2
-(3c25a543)` a build two commits past it, at commit `3c25a543`.
+(3c25a543)` a build two commits past it, at commit `3c25a543`. Both end with
+`built 2026-09-18 16:59`, the time the binary was written by your own clock, so
+two builds of the same commit are told apart and a restart says at once whether
+it took.
 
 The same build by hand, if you prefer:
 
