@@ -1932,6 +1932,12 @@ impl EditorView {
                     }
 
                     let prev_view_id = view!(editor).id;
+                    // Shift and a click take the selection to what was clicked. The first
+                    // one while typing starts from the caret: what grows is what is being
+                    // typed into, not what was selected before the typing began.
+                    let extending = modifiers == KeyModifiers::SHIFT;
+                    let first = extending && commands::mark_insert_selection(editor);
+                    let typing = editor.mode == Mode::Insert;
                     let doc = doc_mut!(editor, &view!(editor, view_id).doc);
 
                     if count > 1 && modifiers.is_empty() {
@@ -1947,6 +1953,19 @@ impl EditorView {
                         doc.set_selection(view_id, Selection::single(range.anchor, range.head));
                         self.drag_unit = Some((unit, range));
                         commands::mark_insert_selection(editor);
+                    } else if extending {
+                        let text = doc.text().slice(..);
+                        let range = doc.selection(view_id).primary();
+                        let primary = if typing {
+                            // While typing the caret is a bar between two characters: the
+                            // selection runs from the boundary it was on to the one clicked,
+                            // and never takes the character past it as well.
+                            let anchor = if first { range.cursor(text) } else { range.anchor };
+                            Range::new(anchor, pos)
+                        } else {
+                            range.put_cursor(text, pos, true)
+                        };
+                        doc.set_selection(view_id, Selection::single(primary.anchor, primary.head));
                     } else if modifiers == KeyModifiers::ALT {
                         let selection = doc.selection(view_id).clone();
                         doc.set_selection(view_id, selection.push(Range::point(pos)));

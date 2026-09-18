@@ -290,6 +290,8 @@ So the keys are the ones you already know:
 | `Ctrl-x` / `Ctrl-c` / `Ctrl-v` | Cut / copy / paste — the whole line when nothing is selected |
 | `Ctrl-a` | Select everything |
 | `Shift` + an arrow | Select while typing (`Ctrl-Shift` for whole words) |
+| `Shift-PageUp` / `Shift-PageDown` | Grow the selection a screenful at a time |
+| `Shift` + a click | Take the selection to where you clicked |
 | `Ctrl` + `←` / `→` | Move by words |
 | `Ctrl-Home` / `Ctrl-End` | To the start and the end of the file |
 | `Backspace` / `Delete` | Delete the selection, or one character |
@@ -351,7 +353,8 @@ are the ones your configuration binds.
 ![The welcome screen, with nothing open](fork/screenshots/welcome.png)
 
 While typing, a selection behaves as it does in any other editor: `Shift` with
-an arrow, `Home` or `End` grows it from the cursor, the mouse drags one, typing
+an arrow, `Home`, `End`, `PageUp` or `PageDown` grows it from the cursor, the
+mouse drags one and `Shift` with a click takes it to where you clicked, typing
 replaces it and `Backspace` or `Delete` removes it. None of that leaves insert
 mode, and none of it touches how selections work outside it, where they are what
 the commands act on.

@@ -378,6 +378,8 @@ impl MappableCommand {
         page_cursor_down, "Move page and cursor down",
         page_cursor_half_up, "Move page and cursor half up",
         page_cursor_half_down, "Move page and cursor half down",
+        extend_page_up, "Extend selection a page up",
+        extend_page_down, "Extend selection a page down",
         select_all, "Select whole document",
         select_regex, "Select all regex matches inside selections",
         split_selection, "Split selections on regex matches",
@@ -2221,6 +2223,45 @@ fn page_cursor_down(cx: &mut Context) {
     let view = view!(cx.editor);
     let offset = view.inner_height();
     scroll(cx, offset, Direction::Forward, true);
+}
+
+/// A page up or down that takes the selection with it: the anchor stays where it is and
+/// the head lands a screenful away, the way Shift with an arrow grows it one line.
+fn extend_page(cx: &mut Context, direction: Direction) {
+    let first = mark_insert_selection(cx.editor);
+    let count = cx.count();
+
+    let (view, doc) = current!(cx.editor);
+    let height = view.inner_height();
+    let text = doc.text().slice(..);
+    let text_fmt = doc.text_format(view.inner_width(doc), None);
+    let mut annotations = view.text_annotations(&*doc, None);
+
+    let selection = doc.selection(view.id).clone().transform(|range| {
+        let (anchor, head) = typing_extent(range, text, first);
+        move_vertically_visual(
+            text,
+            Range::new(anchor, head),
+            direction,
+            height * count,
+            Movement::Extend,
+            &text_fmt,
+            &mut annotations,
+        )
+    });
+    drop(annotations);
+    doc.set_selection(view.id, selection);
+
+    let view_id = view.id;
+    cx.editor.ensure_cursor_in_view(view_id);
+}
+
+fn extend_page_up(cx: &mut Context) {
+    extend_page(cx, Direction::Backward);
+}
+
+fn extend_page_down(cx: &mut Context) {
+    extend_page(cx, Direction::Forward);
 }
 
 fn page_cursor_half_up(cx: &mut Context) {
