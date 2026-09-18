@@ -373,7 +373,7 @@ impl TabView for ChangesTab {
         }
         match how {
             Activation::Click => Outcome::Stay,
-            Activation::Enter => Outcome::Leave,
+            Activation::Enter | Activation::Double => Outcome::Leave,
         }
     }
 

@@ -129,7 +129,12 @@ impl CommitsTab {
     }
 
     pub fn toggle_files(&mut self, cx: &mut TabContext) {
-        self.files_visible = !self.files_visible;
+        self.set_files_visible(cx, !self.files_visible);
+    }
+
+    /// Shows the files of the commit the history cursor is on, or puts the pane away.
+    fn set_files_visible(&mut self, cx: &mut TabContext, visible: bool) {
+        self.files_visible = visible;
         self.files_focused = false;
         self.follow = true;
         if self.files_visible {
@@ -701,6 +706,17 @@ impl TabView for CommitsTab {
         };
         let in_history = !self.files_focused;
         match (row, how) {
+            // A double click on a commit opens the files it touched under the history, and
+            // closes them again: the same pane F9 shows, for the commit clicked. Enter
+            // opens them, as → opens what it is on, and never closes them.
+            (Row::Commit(_), Activation::Double) if in_history => {
+                self.toggle_files(cx);
+                Outcome::Stay
+            }
+            (Row::Commit(_), Activation::Enter) if in_history => {
+                self.set_files_visible(cx, true);
+                Outcome::Stay
+            }
             (Row::Commit(row), _) if in_history => {
                 if let Some(commit) = self.listed().get(row.index).cloned() {
                     self.open_commit(commit);
@@ -713,7 +729,7 @@ impl TabView for CommitsTab {
                 self.preview(cx);
                 Outcome::Stay
             }
-            (_, Activation::Enter) => {
+            (_, Activation::Enter | Activation::Double) => {
                 cx.diff.forget();
                 self.preview(cx);
                 Outcome::Leave

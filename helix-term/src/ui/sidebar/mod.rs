@@ -1097,7 +1097,7 @@ impl Sidebar {
                     self.cursor_moved(editor);
                 }
                 let how = if double {
-                    Activation::Enter
+                    Activation::Double
                 } else {
                     Activation::Click
                 };

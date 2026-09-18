@@ -20,8 +20,11 @@ pub struct TabContext<'a> {
 /// How the row under the cursor was asked to open.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Activation {
-    /// Enter, `l`, or a double click: the row is meant.
+    /// Enter, `l` or `→`: the row is meant.
     Enter,
+    /// A double click: the row is meant, and the same click again undoes it where the tab
+    /// has something to open and close.
+    Double,
     /// A single click: the row is chosen, which for some tabs is enough.
     Click,
 }

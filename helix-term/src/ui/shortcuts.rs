@@ -229,6 +229,11 @@ impl Shortcuts {
                 "Alt+↑ / Alt+↓",
                 "Focus commit history / commit files",
             ),
+            (
+                "Commits",
+                "Double click",
+                "Show or hide the files the commit touched",
+            ),
         ] {
             entries.push(Shortcut::new(scope, keys.into(), description.into(), ""));
         }
