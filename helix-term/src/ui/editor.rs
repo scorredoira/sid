@@ -1594,8 +1594,6 @@ impl EditorView {
         row: u16,
         column: u16,
     ) -> EventResult {
-        // A drag while typing selects, like Shift with an arrow does.
-        let _ = commands::mark_insert_selection(cxt.editor);
         let typing = cxt.editor.mode == Mode::Insert;
 
         let (view, doc) = current!(cxt.editor);
@@ -1642,8 +1640,16 @@ impl EditorView {
             None if typing => Range::new(primary.anchor, pos),
             None => primary.put_cursor(text, pos, true),
         };
+        // A drag while typing selects, like Shift with an arrow does — but only while it
+        // covers something. Pressing and letting go on the same spot is a click, and a
+        // click leaves a caret: what is typed next goes in beside it, never over the
+        // character it landed on.
+        let selected = primary.anchor != primary.head;
         doc.set_selection(view.id, selection);
         let view_id = view.id;
+        if typing {
+            view_mut!(cxt.editor).insert_selection = selected;
+        }
         cxt.editor.ensure_cursor_in_view(view_id);
         EventResult::Consumed(None)
     }
@@ -1955,6 +1961,10 @@ impl EditorView {
                         doc.set_selection(view_id, Selection::single(primary.anchor, primary.head));
                     } else {
                         doc.set_selection(view_id, Selection::point(pos));
+                        // A click selects nothing, whatever was selected before it: the
+                        // caret it leaves is a caret, and typing does not replace the
+                        // character it sits on.
+                        view_mut!(editor, view_id).insert_selection = false;
                     }
 
                     if view_id != prev_view_id {
