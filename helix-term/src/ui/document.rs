@@ -343,7 +343,7 @@ impl<'a> TextRenderer<'a> {
                 &self.virtual_tab[..grapheme_tab_width]
             }
             Grapheme::Other { ref g } if g == "\u{00A0}" => " ",
-            Grapheme::Other { ref g } => g,
+            Grapheme::Other { ref g } => control_picture(g).unwrap_or(g),
             Grapheme::Newline => " ",
         };
 
@@ -400,7 +400,7 @@ impl<'a> TextRenderer<'a> {
             Grapheme::Other { ref g } if g == " " && !grapheme.source.is_eof() => space,
             Grapheme::Other { ref g } if g == "\u{00A0}" => nbsp,
             Grapheme::Other { ref g } if g == "\u{202F}" => nnbsp,
-            Grapheme::Other { ref g } => g,
+            Grapheme::Other { ref g } => control_picture(g).unwrap_or(g),
             Grapheme::Newline => &self.newline,
         };
 
@@ -624,5 +624,34 @@ impl<'t> OverlayHighlighter<'t> {
             acc.patch(self.theme.highlight(highlight))
         });
         self.update_pos();
+    }
+}
+
+/// The pictures of the control characters, ␀ to ␟ and ␡ last: what a byte that is not
+/// text is drawn as.
+const CONTROL_PICTURES: [&str; 33] = [
+    "\u{2400}", "\u{2401}", "\u{2402}", "\u{2403}", "\u{2404}", "\u{2405}", "\u{2406}",
+    "\u{2407}", "\u{2408}", "\u{2409}", "\u{240A}", "\u{240B}", "\u{240C}", "\u{240D}",
+    "\u{240E}", "\u{240F}", "\u{2410}", "\u{2411}", "\u{2412}", "\u{2413}", "\u{2414}",
+    "\u{2415}", "\u{2416}", "\u{2417}", "\u{2418}", "\u{2419}", "\u{241A}", "\u{241B}",
+    "\u{241C}", "\u{241D}", "\u{241E}", "\u{241F}", "\u{2421}",
+];
+
+/// How a grapheme that is a control character is drawn: as the picture of it, one column
+/// wide. A file full of bytes — a .DS_Store, an image opened by mistake — is then read as
+/// what it is, and none of what it contains reaches the terminal as a command.
+pub fn control_picture(g: &str) -> Option<&'static str> {
+    let mut chars = g.chars();
+    let ch = chars.next()?;
+    if chars.next().is_some() {
+        return None;
+    }
+
+    match ch {
+        '\u{0}'..='\u{1f}' => Some(CONTROL_PICTURES[ch as usize]),
+        '\u{7f}' => Some(CONTROL_PICTURES[32]),
+        // The C1 controls, which a terminal obeys as readily as the C0 ones.
+        '\u{80}'..='\u{9f}' => Some("\u{fffd}"),
+        _ => None,
     }
 }

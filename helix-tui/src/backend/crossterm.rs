@@ -15,6 +15,7 @@ use crossterm::{
     Command,
 };
 use helix_view::graphics::{Color, CursorKind, Modifier, Rect, UnderlineStyle};
+use std::borrow::Cow;
 use once_cell::sync::OnceCell;
 use std::{
     fmt,
@@ -278,7 +279,7 @@ where
                 underline_style = new_underline_style;
             }
 
-            queue!(self.buffer, Print(&cell.symbol))?;
+            queue!(self.buffer, Print(printable(&cell.symbol)))?;
         }
 
         queue!(
@@ -467,5 +468,53 @@ impl Command for SetUnderlineColor {
             std::io::ErrorKind::Other,
             "SetUnderlineColor not supported by winapi.",
         ))
+    }
+}
+
+/// A cell as it can be written out: a control character in it is drawn as the picture of
+/// it, never sent as itself. A file of bytes, a filename with an escape in it or a
+/// message quoting either would otherwise reach the terminal as commands and take the
+/// screen apart — the escape would move the cursor, the shift-out would change the
+/// character set, and what is drawn after them would land anywhere.
+fn printable(symbol: &str) -> Cow<'_, str> {
+    // The common case is a letter: one pass over the bytes, and nothing is built. The
+    // C1 controls are the only ones that start with 0xc2 and carry a byte under 0xa0,
+    // so an accented letter or a middle dot stays on the fast path.
+    let bytes = symbol.as_bytes();
+    let suspicious = bytes.iter().enumerate().any(|(at, byte)| {
+        *byte < 0x20
+            || *byte == 0x7f
+            || (*byte == 0xc2 && bytes.get(at + 1).is_some_and(|next| *next < 0xa0))
+    });
+    if !suspicious {
+        return Cow::Borrowed(symbol);
+    }
+
+    let mut out = String::with_capacity(symbol.len());
+    let mut changed = false;
+    for ch in symbol.chars() {
+        match ch {
+            // ␀ to ␟, and ␡ for the delete.
+            '\u{0}'..='\u{1f}' => {
+                changed = true;
+                out.push(char::from_u32(0x2400 + ch as u32).expect("a control picture"));
+            }
+            '\u{7f}' => {
+                changed = true;
+                out.push('\u{2421}');
+            }
+            // The C1 controls, which a terminal obeys as readily as the C0 ones.
+            '\u{80}'..='\u{9f}' => {
+                changed = true;
+                out.push('\u{fffd}');
+            }
+            _ => out.push(ch),
+        }
+    }
+
+    if changed {
+        Cow::Owned(out)
+    } else {
+        Cow::Borrowed(symbol)
     }
 }
