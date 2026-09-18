@@ -310,6 +310,7 @@ So the keys are the ones you already know:
 | `Ctrl-p` | Open a file by name |
 | `F1` / `Ctrl-Shift-p` | The command palette: every command, searchable by name or by what it does (`diff`, `git`), with its keys |
 | `Shift-F1` | Searchable keyboard shortcut reference (including sidebar controls) |
+| `Shift-F10` | What can be done to what the cursor is on — the menu the right button opens, for terminals that keep the right button for themselves |
 | `F4` | Commit diff: full file context / changed sections |
 | `Ctrl-Alt-d` | A diff side by side / one side above the other |
 | `F6` / `F7` | Show or hide the commits / code panel |

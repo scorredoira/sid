@@ -2742,7 +2742,13 @@ pub(super) fn open_review_menu(row: u16, column: u16) -> EventResult {
 
 /// What can be done to the text under the pointer.
 fn open_editor_menu(row: u16, column: u16) -> EventResult {
-    EventResult::Consumed(Some(Box::new(move |compositor, cx| {
+    EventResult::Consumed(Some(editor_menu_at(row, column)))
+}
+
+/// The same menu, opened from wherever it is asked for: the pointer's cell, or the
+/// caret's when a key asks for it and there is no pointer in it.
+pub fn editor_menu_at(row: u16, column: u16) -> crate::compositor::Callback {
+    Box::new(move |compositor, cx| {
         let review = doc!(cx.editor).review.is_some();
         let mut entries = if review {
             vec![context_menu::Entry::new(
@@ -2829,7 +2835,7 @@ fn open_editor_menu(row: u16, column: u16) -> EventResult {
             (row, column),
             entries,
         )));
-    })))
+    })
 }
 
 fn canonicalize_key(key: &mut KeyEvent) {

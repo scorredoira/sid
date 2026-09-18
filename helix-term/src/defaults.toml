@@ -40,6 +40,11 @@ enable = false
 F1 = "command_palette"
 S-F1 = "keyboard_shortcuts"
 F4 = "review_context_toggle"
+# What the right button opens, by key: a terminal that keeps the right button for itself
+# still reaches the menu. Shift-F10 is what every other editor uses for it, and the Menu
+# key is the one keyboards that have it send.
+"S-F10" = "context_menu"
+menu = "context_menu"
 F6 = "review_commits_toggle"
 F7 = "review_code_toggle"
 F9 = "review_files_toggle"

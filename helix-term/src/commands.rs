@@ -380,6 +380,7 @@ impl MappableCommand {
         page_cursor_half_down, "Move page and cursor half down",
         extend_page_up, "Extend selection a page up",
         extend_page_down, "Extend selection a page down",
+        context_menu, "What can be done to what the cursor is on",
         select_all, "Select whole document",
         select_regex, "Select all regex matches inside selections",
         split_selection, "Split selections on regex matches",
@@ -2223,6 +2224,25 @@ fn page_cursor_down(cx: &mut Context) {
     let view = view!(cx.editor);
     let offset = view.inner_height();
     scroll(cx, offset, Direction::Forward, true);
+}
+
+/// The menu the right button opens, opened at the caret: a terminal that keeps the right
+/// button for itself — Ghostty on a Mac shows its own menu — still reaches it by key.
+fn context_menu(cx: &mut Context) {
+    let (view, doc) = current_ref!(cx.editor);
+    let text = doc.text().slice(..);
+    let cursor = doc.selection(view.id).primary().cursor(text);
+    let inner = view.inner_area(doc);
+    let (row, column) = match view.screen_coords_at_pos(doc, text, cursor) {
+        Some(position) => (
+            inner.y + position.row as u16,
+            inner.x + position.col as u16,
+        ),
+        // The caret is off screen: the menu opens where the text starts.
+        None => (inner.y, inner.x),
+    };
+
+    cx.callback.push(crate::ui::editor::editor_menu_at(row, column));
 }
 
 /// A page up or down that takes the selection with it: the anchor stays where it is and
