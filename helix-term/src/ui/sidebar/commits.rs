@@ -54,6 +54,9 @@ pub struct CommitsTab {
     opened: Option<OpenCommit>,
     /// The hash whose files are being asked for.
     opening: Option<String>,
+    /// Whether that open was asked for — F9, Enter, a double click — so its files take the
+    /// keys when they land; following the cursor over the history never moves them.
+    opening_focus: bool,
     /// What the history is narrowed to while the filter box is open.
     filter: Option<String>,
     /// The whole history, read when the box opened, for the filter to look through; until
@@ -113,6 +116,7 @@ impl CommitsTab {
             moves: 0,
             opened: None,
             opening: None,
+            opening_focus: false,
             filter: None,
             whole: None,
             filtered: None,
@@ -140,7 +144,7 @@ impl CommitsTab {
         if self.files_visible {
             let commit = self.listed().get(self.history_list.cursor).cloned();
             if let Some(commit) = commit {
-                self.open_commit(commit);
+                self.open_commit(commit, true);
             } else {
                 self.focus_files(true);
             }
@@ -254,9 +258,10 @@ impl CommitsTab {
 
     /// Opens `commit` into its files, the cursor on the file the commit was reached by when
     /// it carries one. The files are asked of git; the commit opens when they land.
-    pub fn open_commit(&mut self, commit: Commit) {
+    pub fn open_commit(&mut self, commit: Commit, focus: bool) {
         let hash = commit.hash.clone();
         self.opening = Some(hash.clone());
+        self.opening_focus = focus;
         let root = self.root.clone();
         super::background(
             move || git::commit_files(&root, &hash),
@@ -439,7 +444,7 @@ impl CommitsTab {
             list_cursor,
             list_scroll,
         });
-        self.files_focused = self.files_visible;
+        self.files_focused = self.opening_focus && self.files_visible;
         self.follow = true;
         self.list.home();
         self.rebuild(cx.editor);
@@ -478,6 +483,25 @@ impl CommitsTab {
         }
     }
 
+    /// With the files shown, the commit the cursor rests on in the history is the one they
+    /// list: moving over the history opens it, without taking the keys from the history.
+    fn follow_files(&mut self) {
+        if !self.files_visible || self.files_focused {
+            return;
+        }
+        let Some(commit) = self.listed().get(self.history_list.cursor).cloned() else {
+            return;
+        };
+        let shown = self
+            .opened
+            .as_ref()
+            .is_some_and(|opened| opened.commit.hash == commit.hash);
+        if shown || self.opening.as_deref() == Some(commit.hash.as_str()) {
+            return;
+        }
+        self.open_commit(commit, false);
+    }
+
     /// Shows the diff of what the cursor is on once it has rested there: a burst of moves
     /// asks git for the last one only.
     fn preview_when_rested(&mut self) {
@@ -491,6 +515,7 @@ impl CommitsTab {
                 editor,
                 diff: &mut sidebar.diff,
             };
+            sidebar.commits.follow_files();
             sidebar.commits.preview(&mut cx);
         });
     }
@@ -719,7 +744,7 @@ impl TabView for CommitsTab {
             }
             (Row::Commit(row), _) if in_history => {
                 if let Some(commit) = self.listed().get(row.index).cloned() {
-                    self.open_commit(commit);
+                    self.open_commit(commit, false);
                 }
                 Outcome::Stay
             }

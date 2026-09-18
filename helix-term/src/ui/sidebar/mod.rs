@@ -138,8 +138,9 @@ pub struct Sidebar {
     /// Why the remembered width could not be read, said on the first render: at startup the
     /// editor's own messages would cover it.
     width_error: Option<String>,
-    /// The row last clicked and when, so a second click on it soon after is a double click.
-    last_click: Option<(usize, Instant)>,
+    /// The row last clicked, in which pane, and when, so a second click on it soon after is
+    /// a double click even if what the first click opened moved the keys to the other pane.
+    last_click: Option<(bool, usize, Instant)>,
     /// What has been typed to walk to a row by name, and when the last letter landed.
     typed: (String, Option<Instant>),
 }
@@ -273,7 +274,6 @@ impl Sidebar {
             TabKind::Files => self.outline.focused = lower && self.outline.shown(),
             TabKind::Changes => {}
         }
-        self.last_click = None;
     }
 
     fn active_area(&self) -> Rect {
@@ -553,7 +553,7 @@ impl Sidebar {
         self.focused = true;
         self.tab = TabKind::Commits;
         self.revealed = None;
-        self.commits.open_commit(commit);
+        self.commits.open_commit(commit, true);
     }
 
     /// Something on disk changed under `path`, by one of the sidebar's own prompts.
@@ -1175,10 +1175,16 @@ impl Sidebar {
                     return EventResult::Consumed(None);
                 };
                 let now = Instant::now();
-                let double = self
-                    .last_click
-                    .is_some_and(|(row, at)| row == index && now.duration_since(at) < DOUBLE_CLICK);
-                self.last_click = if double { None } else { Some((index, now)) };
+                // The pointer chose the pane above: the row is that pane's own.
+                let pane = self.lower_focused();
+                let double = self.last_click.is_some_and(|(clicked, row, at)| {
+                    clicked == pane && row == index && now.duration_since(at) < DOUBLE_CLICK
+                });
+                self.last_click = if double {
+                    None
+                } else {
+                    Some((pane, index, now))
+                };
                 let before = self.active().list().cursor;
                 self.active_mut().list_mut().select(index);
                 if index != before {
