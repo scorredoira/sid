@@ -1715,9 +1715,19 @@ impl EditorView {
             self.sidebar.focus_code();
         }
 
-        // A drag of the preview's separator stays the preview's when the mouse leaves it.
-        if self.markdown_preview.contains(row, column) || self.markdown_preview.resizing() {
+        // A drag of the preview's separator, or of a selection over its text, stays the
+        // preview's when the mouse leaves it.
+        if self.markdown_preview.contains(row, column)
+            || self.markdown_preview.resizing()
+            || self.markdown_preview.selecting()
+        {
             return self.markdown_preview.handle_mouse(event, cxt);
+        }
+
+        // A press anywhere else leaves nothing selected in the preview: what is
+        // highlighted is what the next Copy would copy, and that is now the file's.
+        if matches!(kind, MouseEventKind::Down(_)) {
+            self.markdown_preview.clear_selection();
         }
 
         // With nothing open, a click runs the welcome's line under it and nothing else: there
@@ -2221,6 +2231,19 @@ impl Component for EditorView {
                     {
                         return EventResult::Consumed(None);
                     }
+                }
+
+                // What the mouse selected in the preview is what Copy copies: a key means
+                // the same thing wherever what it acts on is drawn. Any other key is the
+                // file's, and leaves nothing highlighted behind it.
+                if self.markdown_preview.has_selection() {
+                    if is_copy_key(key) {
+                        self.markdown_preview.copy_selection(cx.editor);
+                        self.markdown_preview.clear_selection();
+                        return EventResult::Consumed(None);
+                    }
+
+                    self.markdown_preview.clear_selection();
                 }
 
                 // A key the sidebar passes on is the editor's, and goes on to the keymap below.
@@ -3021,6 +3044,14 @@ fn mouse_selection_done(cxt: &mut commands::Context) -> EventResult {
     } else {
         EventResult::Ignored(None)
     }
+}
+
+/// Whether `key` is the one that copies: Ctrl-c, or Cmd-c where the terminal sends it.
+fn is_copy_key(key: KeyEvent) -> bool {
+    matches!(key.code, KeyCode::Char('c'))
+        && key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER)
 }
 
 /// A message cut into lines no wider than `width`, breaking between words where it can and

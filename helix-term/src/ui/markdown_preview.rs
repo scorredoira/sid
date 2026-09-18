@@ -11,6 +11,7 @@ use helix_view::{
     editor::Action,
     graphics::{Modifier, Rect, Style, UnderlineStyle},
     input::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind},
+    keyboard::KeyModifiers,
     Align, Document, DocumentId, Editor, Theme,
 };
 use pulldown_cmark::{
@@ -61,6 +62,35 @@ pub struct MarkdownPreview {
     rendered: Option<Rendered>,
     scrolled: Option<Scrolled>,
     rest: Option<Rest>,
+    /// What the mouse drew over the text, if anything is drawn over.
+    selection: Option<PreviewSelection>,
+    /// Whether the mouse is drawing one, so the drag is the preview's wherever the
+    /// pointer goes, as the separator's is.
+    selecting: bool,
+}
+
+/// What the mouse selected: where the button went down and where the pointer is, as a row
+/// of the panel and a column in it. The rows are the ones laid out, not the ones on
+/// screen, so scrolling the panel or the file leaves the selection on the same words.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PreviewSelection {
+    anchor: (usize, usize),
+    head: (usize, usize),
+}
+
+impl PreviewSelection {
+    /// Its ends in reading order, whichever way it was drawn.
+    fn ends(&self) -> ((usize, usize), (usize, usize)) {
+        if self.anchor <= self.head {
+            (self.anchor, self.head)
+        } else {
+            (self.head, self.anchor)
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.anchor == self.head
+    }
 }
 
 /// The rows last drawn, and what they were drawn from.
@@ -186,6 +216,96 @@ impl MarkdownPreview {
         self.resizing
     }
 
+    /// Whether the mouse is drawing a selection over the text: the drag stays the
+    /// preview's when the pointer leaves it, so it can be grown past the panel's edge.
+    pub fn selecting(&self) -> bool {
+        self.selecting
+    }
+
+    /// Whether anything in the panel is selected, and so is what Copy copies.
+    pub fn has_selection(&self) -> bool {
+        self.selection.is_some_and(|selection| !selection.is_empty())
+    }
+
+    /// Nothing is selected any more. Answers whether anything was: the screen only needs
+    /// drawing again if something was highlighted.
+    pub fn clear_selection(&mut self) -> bool {
+        self.selecting = false;
+        self.selection.take().is_some()
+    }
+
+    /// What is selected, as the plain text it was drawn from: the rows it runs over, cut
+    /// at the columns it starts and ends on, without the blanks each row is padded with.
+    pub fn selected_text(&self) -> Option<String> {
+        let selection = self.selection?;
+        if selection.is_empty() {
+            return None;
+        }
+
+        let rows = &self.rendered.as_ref()?.rows;
+        let ((from_row, from_col), (to_row, to_col)) = selection.ends();
+        let mut text = String::new();
+        for index in from_row..=to_row.min(rows.len().saturating_sub(1)) {
+            let row = rows.get(index)?;
+            let from = if index == from_row { from_col } else { 0 };
+            let to = if index == to_row { to_col } else { usize::MAX };
+            if index != from_row {
+                text.push('\n');
+            }
+            text.push_str(slice_columns(&row_text(row), from, to).trim_end());
+        }
+
+        (!text.trim().is_empty()).then_some(text)
+    }
+
+    /// Copy what is selected to the clipboard, the way Copy does over the file. Answers
+    /// whether there was anything to copy.
+    pub fn copy_selection(&self, editor: &mut Editor) -> bool {
+        let Some(text) = self.selected_text() else {
+            return false;
+        };
+
+        match editor.registers.write('+', vec![text]) {
+            Ok(()) => editor.set_status("copied the preview's selection"),
+            Err(err) => editor.set_error(err.to_string()),
+        }
+
+        true
+    }
+
+    /// Where the mouse leaves a selection is where it is yanked from, as in the file: the
+    /// register the mouse yanks to is the system's primary selection on the machines that
+    /// have one.
+    fn yank_selection(&self, editor: &mut Editor) {
+        let Some(text) = self.selected_text() else {
+            return;
+        };
+
+        let register = editor.config().mouse_yank_register;
+        if let Err(err) = editor.registers.write(register, vec![text]) {
+            editor.set_error(err.to_string());
+        }
+    }
+
+    /// The row and column of the text under the pointer, clamped to the panel: the
+    /// pointer above it counts as the first row drawn and below it as the last, so a
+    /// drag that leaves the panel keeps growing the selection.
+    fn position_at(&self, editor: &Editor, row: u16, column: u16) -> Option<(usize, usize)> {
+        let rendered = self.rendered.as_ref()?;
+        if rendered.rows.is_empty() || self.content.height == 0 || self.content.width == 0 {
+            return None;
+        }
+
+        let (view, doc) = current_ref!(editor);
+        let offset = self.offset(doc.id(), top_line(doc, view.id));
+        let on_row = row.clamp(self.content.y, self.content.bottom() - 1);
+        let index =
+            (offset + (on_row - self.content.y) as usize).min(rendered.rows.len() - 1);
+        let column = column.saturating_sub(self.content.x).min(self.content.width) as usize;
+
+        Some((index, column))
+    }
+
     /// Off the screen: the mouse no longer lands on it.
     pub fn hide(&mut self) {
         self.area = Rect::default();
@@ -258,12 +378,54 @@ impl MarkdownPreview {
                         .set_error(format!("Could not remember the preview's width: {err:#}"));
                 }
             }
+            // A press starts a selection, and Shift takes the one already drawn to the
+            // pointer, as they do over the file. What the press landed on is only decided
+            // when the button is let go: a click follows a link, a drag selects.
             MouseEventKind::Down(MouseButton::Left) => {
-                let Some(target) = self.link_at(cx.editor, event.row, event.column) else {
+                let Some(position) = self.position_at(cx.editor, event.row, event.column) else {
                     return EventResult::Ignored(None);
                 };
 
-                self.follow(&target, cx);
+                self.selection = match self.selection {
+                    Some(selection) if event.modifiers == KeyModifiers::SHIFT => {
+                        Some(PreviewSelection {
+                            anchor: selection.anchor,
+                            head: position,
+                        })
+                    }
+                    _ => Some(PreviewSelection {
+                        anchor: position,
+                        head: position,
+                    }),
+                };
+                self.selecting = true;
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.selecting => {
+                let Some(position) = self.position_at(cx.editor, event.row, event.column) else {
+                    return EventResult::Ignored(None);
+                };
+                let Some(selection) = &mut self.selection else {
+                    return EventResult::Ignored(None);
+                };
+                if selection.head == position {
+                    return EventResult::Ignored(None);
+                }
+
+                selection.head = position;
+            }
+            MouseEventKind::Up(MouseButton::Left) if self.selecting => {
+                self.selecting = false;
+
+                // Down and up on the same spot is a click, and a click on a link follows it.
+                if !self.has_selection() {
+                    self.selection = None;
+                    if let Some(target) = self.link_at(cx.editor, event.row, event.column) {
+                        self.follow(&target, cx);
+                    }
+                    return EventResult::Consumed(None);
+                }
+
+                self.yank_selection(cx.editor);
             }
             MouseEventKind::ScrollDown => self.scroll_by(cx.editor, lines),
             MouseEventKind::ScrollUp => self.scroll_by(cx.editor, -lines),
@@ -419,9 +581,36 @@ impl MarkdownPreview {
         }
 
         let offset = self.offset(doc.id(), top_line(doc, view.id));
+        let selection = self
+            .selection
+            .filter(|selection| !selection.is_empty())
+            .map(|selection| selection.ends());
+        let selected = theme.get("ui.selection");
         let rows = &self.rendered.as_ref().expect("rendered above").rows;
-        for (y, row) in (content.y..content.bottom()).zip(rows.iter().skip(offset)) {
+        for (y, (index, row)) in
+            (content.y..content.bottom()).zip(rows.iter().enumerate().skip(offset))
+        {
             surface.set_spans(content.x, y, &row.spans, content.width);
+
+            // What the mouse selected, drawn over the text: a row inside it is taken from
+            // its first column to the end of what is written on it.
+            let Some(((from_row, from_col), (to_row, to_col))) = selection else {
+                continue;
+            };
+            if index < from_row || index > to_row {
+                continue;
+            }
+            let from = if index == from_row { from_col } else { 0 };
+            let to = if index == to_row {
+                to_col
+            } else {
+                row.spans.width()
+            };
+            let from = from.min(content.width as usize) as u16;
+            let to = to.min(content.width as usize) as u16;
+            if to > from {
+                surface.set_style(Rect::new(content.x + from, y, to - from, 1), selected);
+            }
         }
     }
 
@@ -497,6 +686,33 @@ fn slug(heading: &str) -> String {
 
 fn is_markdown(doc: &Document) -> bool {
     doc.language_name() == Some("markdown")
+}
+
+/// The text of a row, without the styles it is drawn with.
+fn row_text(row: &Row) -> String {
+    row.spans
+        .0
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect()
+}
+
+/// The part of `text` that is drawn between two columns.
+fn slice_columns(text: &str, from: usize, to: usize) -> String {
+    let mut column = 0;
+    let mut cut = String::new();
+    for ch in text.chars() {
+        if column >= to {
+            break;
+        }
+        let width = ch.width().unwrap_or(0);
+        if column >= from && column + width <= to {
+            cut.push(ch);
+        }
+        column += width;
+    }
+
+    cut
 }
 
 fn top_line(doc: &Document, view: helix_view::ViewId) -> usize {

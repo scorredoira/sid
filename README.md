@@ -221,7 +221,10 @@ keeps to the part of the file on screen; the wheel over it scrolls it on its
 own until the file moves, and dragging the line between the file and the panel
 resizes it: the width is remembered. A click on a link follows it: a file opens
 in the editor, a `#heading` goes to that heading, and a web address opens in
-the browser.
+the browser. Dragging over the text selects it as the file's own text selects,
+`Shift` and a click takes the selection to the pointer, and `Ctrl-c` copies
+what is selected: while something in the panel is selected, the copy key copies
+that.
 
 ![A README and its preview side by side](fork/screenshots/preview.png)
 
