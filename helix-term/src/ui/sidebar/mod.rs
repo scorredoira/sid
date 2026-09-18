@@ -60,11 +60,32 @@ const TYPING: Duration = Duration::from_millis(800);
 /// The narrowest the separator can be dragged to.
 const MIN_WIDTH: u16 = 12;
 
+/// The room two columns want: the tab strip, and a tree and an outline beside each other.
+const BESIDE_WIDTH: u16 = 46;
+
 /// Where the width the separator was dragged to is remembered.
 const WIDTH_FILE: &str = "sidebar";
 
 /// The columns the sidebar always leaves to the editor, however wide it is asked to be.
 pub const EDITOR_ROOM: u16 = 20;
+
+/// Where the rule between two panes sits: along a row when one is under the other, down
+/// a column when they stand side by side.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Rule {
+    Row(u16),
+    Column(u16),
+}
+
+impl Rule {
+    /// Whether the pointer is on the rule, so a press starts dragging it.
+    fn under(self, event: &MouseEvent) -> bool {
+        match self {
+            Rule::Row(row) => event.row == row,
+            Rule::Column(column) => event.column == column,
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TabKind {
@@ -106,6 +127,8 @@ pub struct Sidebar {
     tab_columns: [(u16, u16); TabKind::ALL.len()],
     /// Where the outline's order was written on its header, for a click to change it.
     sort_columns: (u16, u16),
+    /// The row that header was drawn on: the rule under the tree, or the strip beside it.
+    sort_row: u16,
     /// The width the separator was dragged to, kept between sessions over the configured.
     width: Option<u16>,
     /// Whether the separator is being dragged, so the mouse is the sidebar's wherever it goes.
@@ -194,6 +217,7 @@ impl Sidebar {
             area: Rect::default(),
             tab_columns: [(0, 0); TabKind::ALL.len()],
             sort_columns: (0, 0),
+            sort_row: 0,
             width,
             resizing: false,
             resizing_split: false,
@@ -213,9 +237,9 @@ impl Sidebar {
         }
     }
 
-    /// The two panes of a tab that stacks them: the history over a commit's files, the
-    /// tree over the outline.
-    fn stacked_areas(&self) -> Option<[Rect; 2]> {
+    /// The two panes of a tab that has them: the history over a commit's files, the tree
+    /// over the outline or beside it.
+    fn pane_areas(&self) -> Option<[Rect; 2]> {
         match self.tab {
             TabKind::Commits if self.commits.has_files() => self.commit_layout.panes(self.area),
             TabKind::Files if self.outline.shown() => self.outline.panes(self.area),
@@ -223,7 +247,18 @@ impl Sidebar {
         }
     }
 
-    /// Whether the lower of two stacked panes has the keys.
+    /// Where the rule between the two panes is drawn and dragged.
+    fn rule(&self) -> Option<Rule> {
+        let [first, second] = self.pane_areas()?;
+        Some(if second.y > first.y {
+            Rule::Row(second.y)
+        } else {
+            Rule::Column(second.x - 1)
+        })
+    }
+
+    /// Whether the second of two panes — the files under a commit, the outline under the
+    /// tree or beside it — has the keys.
     fn lower_focused(&self) -> bool {
         match self.tab {
             TabKind::Commits => self.commits.files_focused(),
@@ -242,7 +277,7 @@ impl Sidebar {
     }
 
     fn active_area(&self) -> Rect {
-        match self.stacked_areas() {
+        match self.pane_areas() {
             Some(panes) => panes[usize::from(self.lower_focused())],
             None => self.area,
         }
@@ -283,6 +318,52 @@ impl Sidebar {
     }
 
     /// Lists the outline by name, or back in the file's order.
+    /// Puts the outline in its own column beside the tree, or back under it.
+    pub fn toggle_outline_beside(&mut self, editor: &mut Editor) {
+        let beside = !self.outline.beside();
+        self.outline.set_beside(beside);
+        // The rule moved: a click that was on it is not a double click on a row.
+        self.last_click = None;
+        if beside {
+            self.widen_for_two_columns(editor);
+        }
+        editor.set_status(if beside {
+            "Outline beside the tree"
+        } else {
+            "Outline under the tree"
+        });
+    }
+
+    /// Lists every definition in the outline, or only functions and methods.
+    /// Two columns need the room of two: a narrow panel is widened when the outline moves
+    /// beside the tree, never past half the screen, and the separator drags from there.
+    fn widen_for_two_columns(&mut self, editor: &mut Editor) {
+        if self.code_hidden() || self.area.width >= BESIDE_WIDTH {
+            return;
+        }
+        let total = self.area.width + editor.tree.area().width;
+        let most = total
+            .saturating_sub(EDITOR_ROOM)
+            .min(total / 2)
+            .max(MIN_WIDTH);
+        let wanted = BESIDE_WIDTH.min(most);
+        if wanted > self.area.width {
+            self.width = Some(wanted);
+            if let Err(err) = panel_width::save(WIDTH_FILE, wanted) {
+                log::error!("Could not remember the sidebar width: {err:#}");
+            }
+        }
+    }
+
+    pub fn toggle_outline_kinds(&mut self, editor: &mut Editor) {
+        self.outline.toggle_kinds(editor);
+        editor.set_status(if self.outline.only_functions() {
+            "Outline of functions and methods"
+        } else {
+            "Outline of every definition"
+        });
+    }
+
     pub fn toggle_outline_sort(&mut self, editor: &mut Editor) {
         self.outline.toggle_sort(editor);
         editor.set_status(format!("Outline {}", self.outline.sort_label()));
@@ -739,7 +820,7 @@ impl Sidebar {
                 return result;
             }
         }
-        if self.stacked_areas().is_some()
+        if self.pane_areas().is_some()
             && key.modifiers == KeyModifiers::ALT
             && matches!(key.code, KeyCode::Up | KeyCode::Down)
         {
@@ -935,8 +1016,8 @@ impl Sidebar {
     pub fn handle_mouse(&mut self, event: &MouseEvent, cx: &mut commands::Context) -> EventResult {
         let editor = &mut cx.editor;
         let separator = self.area.right().saturating_sub(1);
-        let panes = self.stacked_areas();
-        let divider = panes.map(|panes| panes[1].y);
+        let panes = self.pane_areas();
+        let rule = self.rule();
         let pointer_selects_pane = matches!(
             event.kind,
             MouseEventKind::Down(_) | MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
@@ -945,7 +1026,7 @@ impl Sidebar {
         if pointer_selects_pane && event.column != separator {
             if let Some(panes) = panes {
                 for (index, pane) in panes.iter().enumerate() {
-                    if event.row > pane.y && event.row < pane.bottom() {
+                    if in_pane(pane, event) {
                         let lower = index == 1;
                         if self.lower_focused() != lower {
                             self.focus_lower(lower);
@@ -955,8 +1036,8 @@ impl Sidebar {
                 }
             }
         }
-        let on_sort_label = divider == Some(event.row)
-            && self.tab == TabKind::Files
+        let on_sort_label = self.tab == TabKind::Files
+            && event.row == self.sort_row
             && event.column >= self.sort_columns.0
             && event.column < self.sort_columns.1;
         match event.kind {
@@ -968,14 +1049,15 @@ impl Sidebar {
             MouseEventKind::Down(MouseButton::Left) if on_sort_label => {
                 self.toggle_outline_sort(editor);
             }
-            MouseEventKind::Down(MouseButton::Left) if divider == Some(event.row) => {
+            MouseEventKind::Down(MouseButton::Left) if rule.is_some_and(|rule| rule.under(event)) => {
                 self.resizing_split = true;
             }
             MouseEventKind::Drag(MouseButton::Left) if self.resizing_split => {
                 if self.tab == TabKind::Commits {
                     self.commit_layout.resize_split(self.area, event.row);
                 } else {
-                    self.outline.resize_split(self.area, event.row);
+                    self.outline
+                        .resize_split(self.area, event.row, event.column);
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) if self.resizing => {
@@ -1024,7 +1106,13 @@ impl Sidebar {
                         self.outline.list_mut().select(index);
                     }
                 }
-                return open_outline_menu(event.row, event.column, self.outline.by_name());
+                return open_outline_menu(
+                    event.row,
+                    event.column,
+                    self.outline.by_name(),
+                    self.outline.only_functions(),
+                    self.outline.beside(),
+                );
             }
             // The right button takes the row it lands on and offers what can be done to it.
             MouseEventKind::Down(MouseButton::Right) if self.active().edits_disk() => {
@@ -1079,7 +1167,7 @@ impl Sidebar {
                     return EventResult::Consumed(None);
                 }
                 let pane = self.active_area();
-                if event.row <= pane.y || event.row >= pane.bottom() {
+                if !in_pane(&pane, event) {
                     return EventResult::Consumed(None);
                 }
                 let line = (event.row - pane.y) as usize;
@@ -1182,7 +1270,7 @@ impl Sidebar {
             return;
         }
         let page = area.height.saturating_sub(1) as usize;
-        match (self.tab, self.stacked_areas()) {
+        match (self.tab, self.pane_areas()) {
             (TabKind::Commits, Some([history, files])) => {
                 self.commits
                     .set_pages((history.height - 1) as usize, (files.height - 1) as usize);
@@ -1226,16 +1314,22 @@ impl Sidebar {
         for y in area.y..area.bottom() {
             surface.set_string(area.right() - 1, y, "│", separator_style);
         }
+        // Beside the tree the outline takes the right of the strip's row for its own
+        // header, so the tabs and the filter box stop at the rule between them.
+        let strip_right = match self.rule() {
+            Some(Rule::Column(column)) => column,
+            _ => area.right() - 1,
+        };
 
         if let Some(filter) = self.filter().map(str::to_string) {
             // The box takes the strip's row; a click there is not a tab's while it is open.
             self.tab_columns = [(0, 0); TabKind::ALL.len()];
             let x = area.x + 1;
-            let room = (area.right() - 1).saturating_sub(x) as usize;
+            let room = strip_right.saturating_sub(x) as usize;
             let (end, _) = surface.set_stringn(x, area.y, "Filter: ", room, inactive_style);
-            let room = (area.right() - 1).saturating_sub(end) as usize;
+            let room = strip_right.saturating_sub(end) as usize;
             let (end, _) = surface.set_stringn(end, area.y, &filter, room, theme.get("ui.text"));
-            if (end as usize) < area.right() as usize - 1 {
+            if end < strip_right {
                 surface.set_string(end, area.y, "▏", header_style);
             }
         } else {
@@ -1255,7 +1349,7 @@ impl Sidebar {
                 } else {
                     inactive_style
                 };
-                let room = (area.right() - 1).saturating_sub(x) as usize;
+                let room = strip_right.saturating_sub(x) as usize;
                 let (end, _) = surface.set_stringn(x, area.y, &label, room, style);
                 self.tab_columns[index] = (x, end);
                 x = end + 2;
@@ -1264,8 +1358,9 @@ impl Sidebar {
 
         self.sort_columns = (0, 0);
         let mut sort_columns = (0, 0);
+        let mut sort_row = 0;
         let tab = self.active();
-        if tab.rows().is_empty() && self.stacked_areas().is_none() {
+        if tab.rows().is_empty() && self.pane_areas().is_none() {
             if let Some(message) = tab.empty_message() {
                 let style = if message.is_error {
                     theme.get("error")
@@ -1287,29 +1382,40 @@ impl Sidebar {
             return;
         }
 
-        let stacked = self.stacked_areas();
+        let stacked = self.pane_areas();
         let split = stacked.is_some();
         let panes = if let Some([upper_area, lower_area]) = stacked {
-            for x in area.x..area.right().saturating_sub(1) {
-                surface.set_string(x, lower_area.y, "─", separator_style);
-            }
-            surface.set_string(area.right() - 1, lower_area.y, "┤", separator_style);
+            // Side by side the rule runs down the column between the panes; stacked it
+            // runs along the second pane's first row, which is its header either way.
+            let beside = lower_area.y == upper_area.y;
+            let heading_x = if beside {
+                for y in area.y..area.bottom() {
+                    surface.set_string(lower_area.x - 1, y, "│", separator_style);
+                }
+                lower_area.x + 1
+            } else {
+                for x in area.x..area.right().saturating_sub(1) {
+                    surface.set_string(x, lower_area.y, "─", separator_style);
+                }
+                surface.set_string(area.right() - 1, lower_area.y, "┤", separator_style);
+                area.x + 1
+            };
             let heading = if self.tab == TabKind::Commits {
                 " Files "
             } else {
                 " Outline "
             };
             let (end, _) = surface.set_stringn(
-                area.x + 1,
+                heading_x,
                 lower_area.y,
                 heading,
-                content_width.saturating_sub(1),
+                (lower_area.width as usize).saturating_sub(2),
                 header_style,
             );
             if self.tab == TabKind::Files {
-                // The order, at the right edge of the rule, where a click turns it over.
+                // The order, at the right edge of the header, where a click turns it over.
                 let label = format!(" {} ", self.outline.sort_label());
-                let right = area.right().saturating_sub(2);
+                let right = lower_area.right().saturating_sub(2);
                 let x = right.saturating_sub(label.len() as u16);
                 if x > end {
                     let style = if self.outline.focused {
@@ -1320,6 +1426,7 @@ impl Sidebar {
                     let (label_end, _) =
                         surface.set_stringn(x, lower_area.y, &label, (right - x) as usize, style);
                     sort_columns = (x, label_end);
+                    sort_row = lower_area.y;
                 }
             }
             match self.tab {
@@ -1354,7 +1461,7 @@ impl Sidebar {
         for (rows, list, focused, area, is_outline) in panes {
             if is_outline && rows.is_empty() {
                 if let Some(message) = self.outline.empty_message() {
-                    let width = content_width.saturating_sub(1);
+                    let width = (area.width as usize).saturating_sub(2);
                     surface.set_string_truncated(
                         area.x + 1,
                         area.y + 1,
@@ -1406,7 +1513,17 @@ impl Sidebar {
             }
         }
         self.sort_columns = sort_columns;
+        self.sort_row = sort_row;
     }
+}
+
+/// Whether the pointer is on one of a pane's rows: inside its columns, below its heading
+/// and clear of the rule at its right edge.
+fn in_pane(pane: &Rect, event: &MouseEvent) -> bool {
+    event.row > pane.y
+        && event.row < pane.bottom()
+        && event.column >= pane.x
+        && event.column + 1 < pane.right()
 }
 
 /// Runs `work` off the main thread and hands what it made to the sidebar, on it.
@@ -1530,7 +1647,13 @@ fn open_menu(
 }
 
 /// What can be done to the outline from a row of it: the order, and putting it away.
-fn open_outline_menu(row: u16, column: u16, by_name: bool) -> EventResult {
+fn open_outline_menu(
+    row: u16,
+    column: u16,
+    by_name: bool,
+    only_functions: bool,
+    beside: bool,
+) -> EventResult {
     EventResult::Consumed(Some(Box::new(move |compositor, _cx| {
         let entries = vec![
             context_menu::Entry::new(
@@ -1555,6 +1678,32 @@ fn open_outline_menu(row: u16, column: u16, by_name: bool) -> EventResult {
                 Box::new(|compositor, cx| {
                     if let Some(view) = compositor.find::<editor::EditorView>() {
                         view.sidebar.toggle_outline_sort(cx.editor);
+                    }
+                }),
+            ),
+            context_menu::Entry::new(
+                if only_functions {
+                    "List every definition"
+                } else {
+                    "List only functions and methods"
+                },
+                "",
+                Box::new(|compositor, cx| {
+                    if let Some(view) = compositor.find::<editor::EditorView>() {
+                        view.sidebar.toggle_outline_kinds(cx.editor);
+                    }
+                }),
+            ),
+            context_menu::Entry::new(
+                if beside {
+                    "Put the outline under the tree"
+                } else {
+                    "Put the outline beside the tree"
+                },
+                "",
+                Box::new(|compositor, cx| {
+                    if let Some(view) = compositor.find::<editor::EditorView>() {
+                        view.sidebar.toggle_outline_beside(cx.editor);
                     }
                 }),
             ),

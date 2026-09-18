@@ -208,6 +208,11 @@ impl Shortcuts {
                 "List the definitions by name, or in the file's order",
             ),
             (
+                "Outline",
+                "Right click",
+                "List only functions and methods or every definition, and put the outline under the tree or beside it",
+            ),
+            (
                 "Changes",
                 "Click / Enter",
                 "Show what the selected file changed",

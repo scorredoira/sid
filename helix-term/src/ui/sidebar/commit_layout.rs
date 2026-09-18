@@ -25,6 +25,39 @@ pub fn stacked_panes(area: Rect, share: u16) -> Option<[Rect; 2]> {
     Some([top, bottom])
 }
 
+/// The narrowest either pane may be dragged to when they sit side by side.
+const MIN_PANE_COLS: u16 = 8;
+
+/// Two panes side by side in `area`, the left one given `share` thousandths of the usable
+/// columns. Each keeps a column at its right edge for a rule: the left pane the draggable
+/// one between them, the right pane the sidebar's own separator. None when the area is too
+/// narrow for both.
+pub fn side_panes(area: Rect, share: u16) -> Option<[Rect; 2]> {
+    let columns = area.width.checked_sub(2)?;
+    if columns < MIN_PANE_COLS * 2 {
+        return None;
+    }
+    let left = (u32::from(columns) * u32::from(share) / 1000) as u16;
+    let left = left.clamp(MIN_PANE_COLS, columns - MIN_PANE_COLS);
+    let first = Rect::new(area.x, area.y, left + 1, area.height);
+    let second = Rect::new(first.right(), area.y, area.width - first.width, area.height);
+    Some([first, second])
+}
+
+/// The share that puts the rule between two side by side panes on screen column `column`;
+/// none when the area is too narrow to split.
+pub fn share_at_column(area: Rect, column: u16) -> Option<u16> {
+    let columns = area.width.checked_sub(2)?;
+    if columns < MIN_PANE_COLS * 2 {
+        return None;
+    }
+    let left = column
+        .saturating_sub(area.x)
+        .clamp(MIN_PANE_COLS, columns - MIN_PANE_COLS);
+    // Round up so converting the share back to columns lands exactly on the pointer.
+    Some((u32::from(left) * 1000).div_ceil(u32::from(columns)) as u16)
+}
+
 /// The share that puts the rule between the panes on screen row `row`; none when the
 /// area is too small to split.
 pub fn share_at(area: Rect, row: u16) -> Option<u16> {

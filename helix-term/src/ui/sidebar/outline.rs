@@ -1,6 +1,6 @@
-//! The outline: the definitions of the file being edited — functions, types, classes —
-//! listed under the tree in the Files tab, in the order they appear or by name. A click
-//! goes to one. The list comes from the language server when one is running, which
+//! The outline: what the file being edited defines — its functions and methods, or every
+//! kind of definition when asked for them — listed under the tree in the Files tab or in
+//! its own column beside it, in the order they appear or by name. A click goes to one. The list comes from the language server when one is running, which
 //! knows every kind of thing the file defines; otherwise from the file's syntax tree,
 //! which needs nothing installed. Either way it follows what is typed.
 
@@ -15,7 +15,7 @@ use helix_view::graphics::{Modifier, Rect, Style};
 use helix_view::{align_view, Align, DocumentId, Editor, Theme};
 use tui::buffer::Buffer as Surface;
 
-use super::commit_layout::{share_at, stacked_panes};
+use super::commit_layout::{share_at, share_at_column, side_panes, stacked_panes};
 use super::entries::{Row, RowPaint, SymbolRow};
 use super::list::List;
 use super::tab::{Activation, Message, Outcome, TabContext, TabView};
@@ -43,15 +43,22 @@ pub struct Said {
     encoding: OffsetEncoding,
 }
 
-/// Whether the outline is shown, how it is ordered and how much of the column the tree
-/// keeps above it, remembered between sessions.
+/// Whether the outline is shown, what it lists, how it is ordered and where it sits
+/// beside the tree, remembered between sessions.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct OutlineLayout {
     pub shown: bool,
     pub by_name: bool,
+    /// Whether it lists only what is called — functions, methods, constructors — rather
+    /// than every definition the file holds.
+    pub only_functions: bool,
+    /// Whether it sits in its own column beside the tree rather than under it.
+    pub beside: bool,
     /// Proportion of the usable rows given to the tree, in thousandths.
     tree_share: u16,
+    /// Proportion of the usable columns given to the tree when the outline is beside it.
+    tree_columns: u16,
 }
 
 impl Default for OutlineLayout {
@@ -59,7 +66,10 @@ impl Default for OutlineLayout {
         Self {
             shown: false,
             by_name: false,
+            only_functions: true,
+            beside: false,
             tree_share: 600,
+            tree_columns: 500,
         }
     }
 }
@@ -68,7 +78,10 @@ impl OutlineLayout {
     pub fn load() -> anyhow::Result<Self> {
         let layout: Option<Self> = panel_width::load_state(STATE_FILE)?;
         let layout = layout.unwrap_or_default();
-        anyhow::ensure!(layout.tree_share <= 1000, "invalid outline pane proportion");
+        anyhow::ensure!(
+            layout.tree_share <= 1000 && layout.tree_columns <= 1000,
+            "invalid outline pane proportion"
+        );
         Ok(layout)
     }
 
@@ -141,6 +154,27 @@ impl Outline {
         self.layout.by_name
     }
 
+    pub fn beside(&self) -> bool {
+        self.layout.beside
+    }
+
+    /// Puts the outline in its own column beside the tree, or back under it.
+    pub fn set_beside(&mut self, beside: bool) {
+        self.layout.beside = beside;
+        self.remember();
+    }
+
+    pub fn only_functions(&self) -> bool {
+        self.layout.only_functions
+    }
+
+    /// Lists only functions and methods, or every definition the file holds.
+    pub fn toggle_kinds(&mut self, editor: &mut Editor) {
+        self.layout.only_functions = !self.layout.only_functions;
+        self.rebuild(editor);
+        self.remember();
+    }
+
     /// Lists the definitions by name, or back in the order they appear in the file.
     pub fn toggle_sort(&mut self, editor: &mut Editor) {
         self.layout.by_name = !self.layout.by_name;
@@ -165,11 +199,21 @@ impl Outline {
     }
 
     pub fn panes(&self, area: Rect) -> Option<[Rect; 2]> {
-        stacked_panes(area, self.layout.tree_share)
+        if self.layout.beside {
+            side_panes(area, self.layout.tree_columns)
+        } else {
+            stacked_panes(area, self.layout.tree_share)
+        }
     }
 
-    pub fn resize_split(&mut self, area: Rect, row: u16) {
-        if let Some(share) = share_at(area, row) {
+    /// Drags the rule between the panes to the pointer: the row it is on when they are
+    /// stacked, the column when the outline is beside the tree.
+    pub fn resize_split(&mut self, area: Rect, row: u16, column: u16) {
+        if self.layout.beside {
+            if let Some(share) = share_at_column(area, column) {
+                self.layout.tree_columns = share;
+            }
+        } else if let Some(share) = share_at(area, row) {
             self.layout.tree_share = share;
         }
     }
@@ -381,9 +425,15 @@ fn flatten(response: lsp::DocumentSymbolResponse, encoding: OffsetEncoding, out:
     }
 }
 
+/// Whether a definition is something that is called: what the outline lists when it is
+/// narrowed to functions and methods, a constructor being a method under another name.
+fn is_callable(kind: &str) -> bool {
+    matches!(kind, "function" | "method" | "construct")
+}
+
 /// Lays `symbols`, in the file's order, out as rows: each one indented by how many
 /// definitions it sits inside.
-fn nested_rows(symbols: &[Symbol]) -> Vec<Row> {
+fn nested_rows(symbols: &[&Symbol]) -> Vec<Row> {
     let mut open: Vec<usize> = Vec::new();
     symbols
         .iter()
@@ -399,8 +449,8 @@ fn nested_rows(symbols: &[Symbol]) -> Vec<Row> {
 }
 
 /// Lays `symbols` out by name, flat: a name reads the same wherever it was defined.
-fn named_rows(symbols: &[Symbol]) -> Vec<Row> {
-    let mut sorted: Vec<&Symbol> = symbols.iter().collect();
+fn named_rows(symbols: &[&Symbol]) -> Vec<Row> {
+    let mut sorted: Vec<&Symbol> = symbols.to_vec();
     sorted.sort_by_cached_key(|symbol| (symbol.name.to_lowercase(), symbol.start));
     sorted
         .into_iter()
@@ -439,6 +489,8 @@ impl TabView for Outline {
     fn empty_message(&self) -> Option<Message> {
         let text = if !self.has_syntax {
             "no outline for this file"
+        } else if self.layout.only_functions && !self.symbols.is_empty() {
+            "no functions or methods here"
         } else {
             "nothing defined here"
         };
@@ -455,10 +507,15 @@ impl TabView for Outline {
             Some(Row::Symbol(symbol)) => Some((symbol.name.clone(), symbol.kind)),
             _ => None,
         };
+        let listed: Vec<&Symbol> = self
+            .symbols
+            .iter()
+            .filter(|symbol| !self.layout.only_functions || is_callable(symbol.kind))
+            .collect();
         self.rows = if self.layout.by_name {
-            named_rows(&self.symbols)
+            named_rows(&listed)
         } else {
-            nested_rows(&self.symbols)
+            nested_rows(&listed)
         };
         self.list.set_len(self.rows.len());
         let found = selected.and_then(|(name, kind)| {
@@ -546,6 +603,17 @@ mod tests {
         }
     }
 
+    fn listed(symbols: &[Symbol]) -> Vec<&Symbol> {
+        symbols.iter().collect()
+    }
+
+    fn only_callable(symbols: &[Symbol]) -> Vec<&Symbol> {
+        symbols
+            .iter()
+            .filter(|symbol| is_callable(symbol.kind))
+            .collect()
+    }
+
     fn names(rows: &[Row]) -> Vec<(String, usize)> {
         rows.iter()
             .map(|row| match row {
@@ -565,7 +633,7 @@ mod tests {
             symbol("main", "function", 120, 150),
         ];
         assert_eq!(
-            names(&nested_rows(&symbols)),
+            names(&nested_rows(&listed(&symbols))),
             vec![
                 ("Shape".to_string(), 0),
                 ("area".to_string(), 1),
@@ -584,7 +652,7 @@ mod tests {
             symbol("beta", "method", 30, 40),
         ];
         assert_eq!(
-            names(&named_rows(&symbols)),
+            names(&named_rows(&listed(&symbols))),
             vec![
                 ("Alpha".to_string(), 0),
                 ("beta".to_string(), 0),
@@ -594,17 +662,57 @@ mod tests {
     }
 
     #[test]
+    fn only_functions_leaves_what_is_called_and_nests_it_afresh() {
+        let symbols = vec![
+            symbol("Shape", "class", 0, 100),
+            symbol("width", "field", 5, 8),
+            symbol("area", "method", 10, 40),
+            symbol("helper", "function", 20, 30),
+            symbol("Colour", "enum", 110, 118),
+            symbol("main", "function", 120, 150),
+        ];
+        assert_eq!(
+            names(&nested_rows(&only_callable(&symbols))),
+            vec![
+                ("area".to_string(), 0),
+                ("helper".to_string(), 1),
+                ("main".to_string(), 0),
+            ]
+        );
+    }
+
+    #[test]
     fn a_saved_layout_survives_a_round_trip() {
         let layout = OutlineLayout {
             shown: true,
             by_name: true,
+            only_functions: false,
+            beside: true,
             tree_share: 450,
+            tree_columns: 400,
         };
         let saved = toml::to_string(&layout).unwrap();
         let restored: OutlineLayout = toml::from_str(&saved).unwrap();
-        assert!(restored.shown && restored.by_name);
+        assert!(restored.shown && restored.by_name && restored.beside);
+        assert!(!restored.only_functions);
         let [tree, outline] = stacked_panes(Rect::new(0, 0, 40, 42), restored.tree_share).unwrap();
         assert_eq!(tree.height - 1, 18);
         assert_eq!(outline.bottom(), 42);
+        let [tree, outline] = side_panes(Rect::new(0, 0, 42, 20), restored.tree_columns).unwrap();
+        assert_eq!(tree.width - 1, 16);
+        assert_eq!(outline.right(), 42);
+        assert_eq!(tree.right(), outline.x);
+    }
+
+    /// A layout written before the outline could sit beside the tree still reads, and the
+    /// fields it never held come back at their defaults.
+    #[test]
+    fn an_older_layout_reads_with_the_new_fields_defaulted() {
+        let restored: OutlineLayout =
+            toml::from_str("shown = true\nby_name = false\ntree_share = 600\n").unwrap();
+        assert!(restored.shown);
+        assert!(restored.only_functions);
+        assert!(!restored.beside);
+        assert_eq!(restored.tree_columns, 500);
     }
 }
