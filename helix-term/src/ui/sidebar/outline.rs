@@ -26,16 +26,31 @@ use crate::ui::{editor, panel_width};
 
 const STATE_FILE: &str = "sidebar-outline";
 
-/// How long the file rests after a change before the language server is asked again: a
-/// burst of typing asks once, at the end.
+/// How long the file rests after a change before the definitions are read again, from
+/// the syntax tree or the language server: a burst of typing reads once, at the end.
 const ASK_DELAY: Duration = Duration::from_millis(300);
 
-/// A document at a text version, including edits not yet committed to history.
-type Key = (DocumentId, i32);
+/// A document at a text version, including edits not yet committed to history, and
+/// whether a language server that lists definitions is up for it: a server that comes up
+/// after the file was read is a new key, so the outline asks it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Key {
+    doc: DocumentId,
+    version: i32,
+    served: bool,
+}
 
 fn current_key(editor: &Editor) -> Key {
     let doc = doc!(editor);
-    (doc.id(), doc.version())
+    let served = doc
+        .language_servers_with_feature(LanguageServerFeature::DocumentSymbols)
+        .next()
+        .is_some();
+    Key {
+        doc: doc.id(),
+        version: doc.version(),
+        served,
+    }
 }
 
 /// A definition as the language server said it, before its positions are turned into
@@ -108,8 +123,9 @@ pub struct Outline {
     wanted: Option<Key>,
     /// Whether the definitions came from a language server or the syntax tree.
     from_server: bool,
-    /// Whether that document has a syntax tree at all.
-    has_syntax: bool,
+    /// Whether the document can be outlined at all: it has a syntax tree, or a language
+    /// server answered for it.
+    can_outline: bool,
     /// Whether the keys are the outline's rather than the tree's.
     pub focused: bool,
     /// The row of the definition the editor's cursor is inside, the innermost.
@@ -117,6 +133,8 @@ pub struct Outline {
 }
 
 impl Outline {
+    /// The outline as it was last left, read from the data directory; a broken file
+    /// costs the layout, not the outline, and is said once.
     pub fn new() -> (Self, Option<String>) {
         let (layout, error) = match OutlineLayout::load() {
             Ok(layout) => (layout, None),
@@ -128,7 +146,12 @@ impl Outline {
                 )
             }
         };
-        let outline = Self {
+        (Self::with_layout(layout), error)
+    }
+
+    /// An outline laid out as `layout` says, reading nothing from disk.
+    pub fn with_layout(layout: OutlineLayout) -> Self {
+        Self {
             layout,
             rows: Vec::new(),
             list: List::default(),
@@ -136,11 +159,10 @@ impl Outline {
             read_from: None,
             wanted: None,
             from_server: false,
-            has_syntax: false,
+            can_outline: false,
             focused: false,
             current: None,
-        };
-        (outline, error)
+        }
     }
 
     pub fn shown(&self) -> bool {
@@ -234,34 +256,28 @@ impl Outline {
 
     /// Reads the definitions again when the file being edited changed, or was edited,
     /// and marks the one the cursor is inside; run at every render while on screen.
+    ///
+    /// Another file is read from its syntax tree right away, so the list never lags a
+    /// switch, and the server's word replaces that when it comes. The same file edited
+    /// keeps its list until the typing rests: reading a whole file's tags on every
+    /// keystroke would be paid on the main thread, and a server asked that often would
+    /// answer for text already gone.
     pub fn sync(&mut self, editor: &mut Editor, keys_here: bool) {
-        let doc = doc!(editor);
         let key = current_key(editor);
         if self.read_from != Some(key) && self.wanted != Some(key) {
-            let served = doc
-                .language_servers_with_feature(LanguageServerFeature::DocumentSymbols)
-                .next()
-                .is_some();
-            if !served {
-                self.wanted = None;
-                self.read(editor);
-                self.read_from = Some(key);
-                self.from_server = false;
-            } else {
-                // Another file: the syntax tree says what it can right away, and the
-                // server's word replaces it when it comes. The same file edited keeps
-                // its list until then, rather than flicker between two shapes.
-                if self.read_from.map(|(id, _)| id) != Some(key.0) {
-                    self.read(editor);
-                    self.read_from = Some(key);
-                    self.from_server = false;
-                }
+            let other_file = self.read_from.map(|read| read.doc) != Some(key.doc);
+            if other_file {
+                self.read_now(editor, key);
+            }
+            if key.served || !other_file {
                 self.wanted = Some(key);
                 super::later(ASK_DELAY, move |sidebar, editor| {
                     if sidebar.outline.wanted == Some(key) {
-                        sidebar.outline.ask(editor, key);
+                        sidebar.outline.serve(editor, key);
                     }
                 });
+            } else {
+                self.wanted = None;
             }
         }
         let (view, doc) = current_ref!(editor);
@@ -289,11 +305,40 @@ impl Outline {
         }
     }
 
-    fn read(&mut self, editor: &mut Editor) {
+    /// Reads what is waited for right away, without the rest the typing is given: for a
+    /// refresh, and for tests that cannot wait on the editor's jobs.
+    pub fn settle(&mut self, editor: &mut Editor) {
+        if let Some(key) = self.wanted {
+            self.serve(editor, key);
+        }
+    }
+
+    /// Serves `key`, once its wait is over: from the language server when one is up for
+    /// the file, from the syntax tree otherwise. Nothing is read for a key that is no
+    /// longer the file being edited as it is now.
+    fn serve(&mut self, editor: &mut Editor, key: Key) {
+        if current_key(editor) != key {
+            if self.wanted == Some(key) {
+                self.wanted = None;
+            }
+            return;
+        }
+        if key.served {
+            self.ask(editor, key);
+        } else {
+            self.wanted = None;
+            self.read_now(editor, key);
+        }
+    }
+
+    /// Reads the file's definitions from its syntax tree, on the main thread, now.
+    fn read_now(&mut self, editor: &mut Editor, key: Key) {
         let loader = editor.syn_loader.load();
         let doc = doc!(editor);
-        self.has_syntax = doc.syntax().is_some();
+        self.can_outline = doc.syntax().is_some();
         let symbols = document_symbols(doc, &loader);
+        self.read_from = Some(key);
+        self.from_server = false;
         self.take(editor, symbols);
     }
 
@@ -307,13 +352,7 @@ impl Outline {
     /// Asks the document's language servers for its definitions, off the main thread;
     /// what they say lands back in [`Outline::landed`].
     fn ask(&mut self, editor: &mut Editor, key: Key) {
-        if current_key(editor) != key {
-            if self.wanted == Some(key) {
-                self.wanted = None;
-            }
-            return;
-        }
-        let Some(doc) = editor.documents.get(&key.0) else {
+        let Some(doc) = editor.documents.get(&key.doc) else {
             self.wanted = None;
             return;
         };
@@ -328,9 +367,7 @@ impl Outline {
             .collect();
         if requests.is_empty() {
             self.wanted = None;
-            self.read(editor);
-            self.read_from = Some(key);
-            self.from_server = false;
+            self.read_now(editor, key);
             return;
         }
         tokio::spawn(async move {
@@ -367,13 +404,11 @@ impl Outline {
         if current_key(editor) != key {
             return;
         }
-        let Some(doc) = editor.documents.get(&key.0) else {
+        let Some(doc) = editor.documents.get(&key.doc) else {
             return;
         };
         let Some(said) = said else {
-            self.read(editor);
-            self.read_from = Some(key);
-            self.from_server = false;
+            self.read_now(editor, key);
             return;
         };
         let text = doc.text();
@@ -397,7 +432,7 @@ impl Outline {
                 })
             })
             .collect();
-        self.has_syntax = true;
+        self.can_outline = true;
         self.from_server = true;
         self.read_from = Some(key);
         self.take(editor, symbols);
@@ -501,7 +536,7 @@ impl TabView for Outline {
     }
 
     fn empty_message(&self) -> Option<Message> {
-        let text = if !self.has_syntax {
+        let text = if !self.can_outline {
             "no outline for this file"
         } else if self.layout.only_functions && !self.symbols.is_empty() {
             "no functions or methods here"
@@ -542,10 +577,12 @@ impl TabView for Outline {
         }
     }
 
+    /// F5: the definitions are read again now, and the server asked again.
     fn refresh(&mut self, cx: &mut TabContext) {
         self.read_from = None;
         self.wanted = None;
         self.sync(cx.editor, self.focused);
+        self.settle(cx.editor);
     }
 
     /// Goes to the definition under the cursor, and the typing goes there with it, by a
@@ -557,7 +594,7 @@ impl TabView for Outline {
         let start = symbol.jump;
         let (view, doc) = current!(cx.editor);
         // The file changed under the list and the render has not caught up yet.
-        if self.read_from.map(|(id, _)| id) != Some(doc.id()) {
+        if self.read_from.map(|read| read.doc) != Some(doc.id()) {
             return Outcome::Stay;
         }
         let start = start.min(doc.text().len_chars());

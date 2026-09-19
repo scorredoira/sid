@@ -115,6 +115,7 @@ async fn outline_follows_uncommitted_edits_and_undo() -> anyhow::Result<()> {
         "Rust grammar must be available"
     );
     let (mut outline, _) = Outline::new();
+    // A file just switched to is read right away.
     outline.sync(&mut app.editor, false);
     assert_eq!(names(&outline), ["alpha"]);
     let revision = doc_mut!(app.editor).get_current_revision();
@@ -125,7 +126,10 @@ async fn outline_follows_uncommitted_edits_and_undo() -> anyhow::Result<()> {
         assert_eq!(doc.get_current_revision(), revision);
         assert!(doc.is_modified());
     }
+    // The same file edited waits for the typing to rest before it is read again.
     outline.sync(&mut app.editor, false);
+    assert_eq!(names(&outline), ["alpha"]);
+    outline.settle(&mut app.editor);
     assert_eq!(names(&outline), ["omega"]);
     assert_eq!(std::fs::read_to_string(&file)?, "fn alpha() {}\n");
     {
@@ -134,12 +138,14 @@ async fn outline_follows_uncommitted_edits_and_undo() -> anyhow::Result<()> {
         assert!(doc.undo(view));
     }
     outline.sync(&mut app.editor, false);
+    outline.settle(&mut app.editor);
     assert_eq!(names(&outline), ["alpha"]);
     {
         let (view, doc) = current!(app.editor);
         assert!(doc.redo(view));
     }
     outline.sync(&mut app.editor, false);
+    outline.settle(&mut app.editor);
     assert_eq!(names(&outline), ["omega"]);
     test_key_sequence(&mut app, Some("<esc>"), None, false).await?;
     Ok(())
