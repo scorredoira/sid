@@ -88,3 +88,59 @@ async fn discarding_a_tracked_file_reloads_its_buffer() -> anyhow::Result<()> {
     test_key_sequence(&mut app, Some("<esc>"), None, false).await?;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn outline_follows_uncommitted_edits_and_undo() -> anyhow::Result<()> {
+    use helix_core::Transaction;
+    use helix_term::ui::sidebar::{entries::Row, outline::Outline, tab::TabView};
+    use helix_view::{current, doc_mut};
+
+    fn names(outline: &Outline) -> Vec<&str> {
+        outline
+            .rows()
+            .iter()
+            .filter_map(|row| match row {
+                Row::Symbol(symbol) => Some(symbol.name.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("outline.rs");
+    std::fs::write(&file, "fn alpha() {}\n")?;
+    let mut app = AppBuilder::new().with_file(&file, None).build()?;
+    assert!(
+        doc!(app.editor).syntax().is_some(),
+        "Rust grammar must be available"
+    );
+    let (mut outline, _) = Outline::new();
+    outline.sync(&mut app.editor, false);
+    assert_eq!(names(&outline), ["alpha"]);
+    let revision = doc_mut!(app.editor).get_current_revision();
+    {
+        let (view, doc) = current!(app.editor);
+        let change = Transaction::change(doc.text(), [(3, 8, Some("omega".into()))].into_iter());
+        doc.apply(&change, view.id);
+        assert_eq!(doc.get_current_revision(), revision);
+        assert!(doc.is_modified());
+    }
+    outline.sync(&mut app.editor, false);
+    assert_eq!(names(&outline), ["omega"]);
+    assert_eq!(std::fs::read_to_string(&file)?, "fn alpha() {}\n");
+    {
+        let (view, doc) = current!(app.editor);
+        doc.append_changes_to_history(view);
+        assert!(doc.undo(view));
+    }
+    outline.sync(&mut app.editor, false);
+    assert_eq!(names(&outline), ["alpha"]);
+    {
+        let (view, doc) = current!(app.editor);
+        assert!(doc.redo(view));
+    }
+    outline.sync(&mut app.editor, false);
+    assert_eq!(names(&outline), ["omega"]);
+    test_key_sequence(&mut app, Some("<esc>"), None, false).await?;
+    Ok(())
+}

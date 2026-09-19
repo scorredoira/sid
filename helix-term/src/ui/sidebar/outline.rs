@@ -30,8 +30,13 @@ const STATE_FILE: &str = "sidebar-outline";
 /// burst of typing asks once, at the end.
 const ASK_DELAY: Duration = Duration::from_millis(300);
 
-/// A document at a revision: what a list of definitions was read from.
-type Key = (DocumentId, usize);
+/// A document at a text version, including edits not yet committed to history.
+type Key = (DocumentId, i32);
+
+fn current_key(editor: &Editor) -> Key {
+    let doc = doc!(editor);
+    (doc.id(), doc.version())
+}
 
 /// A definition as the language server said it, before its positions are turned into
 /// characters of the document, which only the main thread holds.
@@ -96,9 +101,9 @@ pub struct Outline {
     list: List,
     /// The definitions in the order they appear in the file.
     symbols: Vec<Symbol>,
-    /// Which document, at which revision, the definitions were read from.
+    /// Which document, at which text version, the definitions were read from.
     read_from: Option<Key>,
-    /// The revision the language server was asked about, or is about to be, until its
+    /// The text version the language server was asked about, or is about to be, until its
     /// answer lands; an answer for any other is dropped.
     wanted: Option<Key>,
     /// Whether the definitions came from a language server or the syntax tree.
@@ -230,8 +235,8 @@ impl Outline {
     /// Reads the definitions again when the file being edited changed, or was edited,
     /// and marks the one the cursor is inside; run at every render while on screen.
     pub fn sync(&mut self, editor: &mut Editor, keys_here: bool) {
-        let doc = doc_mut!(editor);
-        let key = (doc.id(), doc.get_current_revision());
+        let doc = doc!(editor);
+        let key = current_key(editor);
         if self.read_from != Some(key) && self.wanted != Some(key) {
             let served = doc
                 .language_servers_with_feature(LanguageServerFeature::DocumentSymbols)
@@ -302,6 +307,12 @@ impl Outline {
     /// Asks the document's language servers for its definitions, off the main thread;
     /// what they say lands back in [`Outline::landed`].
     fn ask(&mut self, editor: &mut Editor, key: Key) {
+        if current_key(editor) != key {
+            if self.wanted == Some(key) {
+                self.wanted = None;
+            }
+            return;
+        }
         let Some(doc) = editor.documents.get(&key.0) else {
             self.wanted = None;
             return;
@@ -353,6 +364,9 @@ impl Outline {
             return;
         }
         self.wanted = None;
+        if current_key(editor) != key {
+            return;
+        }
         let Some(doc) = editor.documents.get(&key.0) else {
             return;
         };

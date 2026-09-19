@@ -311,7 +311,7 @@ impl Sidebar {
     pub(crate) fn outline_landed(
         &mut self,
         editor: &mut Editor,
-        key: (helix_view::DocumentId, usize),
+        key: (helix_view::DocumentId, i32),
         said: Option<Vec<outline::Said>>,
     ) {
         self.outline.landed(editor, key, said);
