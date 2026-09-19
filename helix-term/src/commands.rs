@@ -428,6 +428,7 @@ impl MappableCommand {
         toggle_hidden_files, "Show or hide hidden files in the file tree",
         outline_toggle, "Show or hide the outline of the current file's functions and types, under the file tree",
         outline_sort_toggle, "List the outline by name, or in the order the file defines things",
+        review_cycle, "Move between the code, the changes and the commits",
         review_commits_toggle, "Show or hide the git commits panel",
         review_code_toggle, "Show or hide the code panel while reviewing git commits",
         review_files_toggle, "Show or hide the files panel of a git commit",
@@ -2239,15 +2240,13 @@ fn context_menu(cx: &mut Context) {
     let cursor = doc.selection(view.id).primary().cursor(text);
     let inner = view.inner_area(doc);
     let (row, column) = match view.screen_coords_at_pos(doc, text, cursor) {
-        Some(position) => (
-            inner.y + position.row as u16,
-            inner.x + position.col as u16,
-        ),
+        Some(position) => (inner.y + position.row as u16, inner.x + position.col as u16),
         // The caret is off screen: the menu opens where the text starts.
         None => (inner.y, inner.x),
     };
 
-    cx.callback.push(crate::ui::editor::editor_menu_at(row, column));
+    cx.callback
+        .push(crate::ui::editor::editor_menu_at(row, column));
 }
 
 /// A page up or down that takes the selection with it: the anchor stays where it is and
@@ -3757,17 +3756,58 @@ fn replace_in_documents(
 
 /// What the command palette searches a command by: its name as the palette shows it, and
 /// what it does.
+/// Everything the command palette offers: what the editor does, what the command line
+/// takes, and the settings as the commands that flip them. A setting is something the
+/// editor does, so it is looked for, run and given a key here like anything else, under
+/// the words the settings screen uses and not `:toggle-option "soft-wrap.enable"`.
+fn palette_commands() -> impl Iterator<Item = MappableCommand> {
+    MappableCommand::STATIC_COMMAND_LIST
+        .iter()
+        .cloned()
+        .chain(
+            typed::TYPABLE_COMMAND_LIST
+                .iter()
+                .map(|cmd| MappableCommand::Typable {
+                    name: cmd.name.to_owned(),
+                    args: String::new(),
+                    doc: cmd.doc.to_owned(),
+                }),
+        )
+        .chain(
+            crate::ui::settings::as_commands()
+                .into_iter()
+                .map(|(key, doc)| MappableCommand::Typable {
+                    name: "toggle-option".to_owned(),
+                    args: key,
+                    doc,
+                }),
+        )
+}
+
 fn palette_text(command: &MappableCommand) -> String {
     let name = match command {
+        // What it is given is part of what it is: ":toggle-option soft-wrap.enable" is
+        // found by "soft-wrap", which is what the setting is called in config.toml.
+        MappableCommand::Typable { name, args, .. } if !args.is_empty() => {
+            format!(":{name} {args}")
+        }
         MappableCommand::Typable { .. } => format!(":{}", command.name()),
         _ => command.name().to_string(),
     };
-    format!("{name} {}", command.doc())
+    // A setting also answers to the words somebody looks for it by: "word wrap" finds
+    // the one the screen calls "Wrap long lines".
+    let also = match command {
+        MappableCommand::Typable { name, args, .. } if name == "toggle-option" => {
+            crate::ui::settings::also(args)
+        }
+        _ => "",
+    };
+    format!("{name} {} {also}", command.doc())
 }
 
 #[cfg(test)]
 mod palette_test {
-    use super::{palette_text, MappableCommand};
+    use super::{palette_commands, palette_text, MappableCommand};
     use nucleo::pattern::{CaseMatching, Normalization, Pattern};
 
     fn found(query: &str, name: &str) -> bool {
@@ -3793,6 +3833,43 @@ mod palette_test {
         let query = crate::ui::picker::whole_words(query);
         let pattern = Pattern::parse(&query, CaseMatching::Smart, Normalization::Smart);
         pattern.score(haystack, &mut matcher).is_some()
+    }
+
+    /// What the palette would show for `query`, as what each row runs.
+    fn offered(query: &str) -> Vec<String> {
+        let query = crate::ui::picker::whole_words(query);
+        let pattern = Pattern::parse(&query, CaseMatching::Smart, Normalization::Smart);
+        let mut matcher = nucleo::Matcher::new(nucleo::Config::DEFAULT);
+        palette_commands()
+            .filter(|command| {
+                let text = palette_text(command);
+                let mut buffer = Vec::new();
+                let haystack = nucleo::Utf32Str::new(&text, &mut buffer);
+                pattern.score(haystack, &mut matcher).is_some()
+            })
+            .map(|command| match &command {
+                MappableCommand::Typable { name, args, .. } if !args.is_empty() => {
+                    format!(":{name} {args}")
+                }
+                other => other.name().to_string(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_palette_offers_a_setting_by_every_word_for_it() {
+        let wrapping = ":toggle-option soft-wrap.enable".to_string();
+        // What it is called on the settings screen, and what anybody would type.
+        for query in ["wrap", "word wrap", "wordwrap", "long lines", "soft-wrap"] {
+            assert!(
+                offered(query).contains(&wrapping),
+                "'{query}' does not offer wrapping: {:?}",
+                offered(query)
+            );
+        }
+        // And the other settings are there to be found and given keys too.
+        assert!(offered("cursor blink").contains(&":toggle-option cursor-blink".to_string()));
+        assert!(offered("mouse").contains(&":toggle-option mouse".to_string()));
     }
 
     #[test]
@@ -5146,15 +5223,7 @@ pub fn command_palette(cx: &mut Context) {
                 cx.editor.keyboard_enhanced,
             );
 
-            let commands = MappableCommand::STATIC_COMMAND_LIST.iter().cloned().chain(
-                typed::TYPABLE_COMMAND_LIST
-                    .iter()
-                    .map(|cmd| MappableCommand::Typable {
-                        name: cmd.name.to_owned(),
-                        args: String::new(),
-                        doc: cmd.doc.to_owned(),
-                    }),
-            );
+            let commands = palette_commands();
 
             let columns = [
                 ui::PickerColumn::new("name", |item, _| match item {

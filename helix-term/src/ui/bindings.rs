@@ -478,8 +478,13 @@ pub fn catalogue() -> Vec<(Runs, String)> {
                 command.doc.to_string(),
             )
         });
+    // Flipping a setting is something the editor does, and so something a key can reach:
+    // it is offered here under the words the settings screen uses for it.
+    let settings = super::settings::as_commands()
+        .into_iter()
+        .map(|(key, doc)| (Runs::One(format!(":toggle-option {key}")), doc));
 
-    statics.chain(typables).collect()
+    statics.chain(typables).chain(settings).collect()
 }
 
 #[cfg(test)]

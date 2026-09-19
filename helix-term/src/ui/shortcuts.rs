@@ -1048,6 +1048,42 @@ mod tests {
     }
 
     #[test]
+    fn a_setting_can_be_given_a_key_whether_one_reaches_it_or_not() {
+        // Alt-z already flips wrapping; the screen shows it by what it does.
+        let trie: KeyTrie = toml::from_str(r#"A-z = ":toggle soft-wrap.enable""#).unwrap();
+        let maps: HashMap<Mode, KeyTrie> = MODES.iter().map(|mode| (*mode, trie.clone())).collect();
+        let screen = Shortcuts::new(&maps, true);
+        let wrapping = Runs::One(":toggle-option soft-wrap.enable".into());
+        let row = screen
+            .rows
+            .iter()
+            .find(|row| row.runs == wrapping)
+            .expect("the setting is listed");
+        assert_eq!(row.label, "Alt+z");
+        assert_eq!(row.description, "Wrap long lines, on or off");
+        assert_eq!(
+            screen
+                .rows
+                .iter()
+                .filter(|row| row.runs == wrapping)
+                .count(),
+            1,
+            "listed once, as a shortcut and not again as something waiting for one"
+        );
+
+        // And one no key reaches is waiting there to be given one.
+        let blink = Runs::One(":toggle-option cursor-blink".into());
+        let waiting = Shortcuts::giving(&maps, true, &blink);
+        let capture = waiting.capture.as_ref().expect("it asks for the keys");
+        assert_eq!(capture.runs, blink);
+        assert!(capture.was.is_empty());
+        assert!(
+            capture.runs.trie().is_ok(),
+            "and what it would write parses"
+        );
+    }
+
+    #[test]
     fn ctrl_k_in_the_palette_opens_the_screen_asking_for_the_keys() {
         let trie: KeyTrie = toml::from_str("").unwrap();
         let maps = MODES.iter().map(|mode| (*mode, trie.clone())).collect();

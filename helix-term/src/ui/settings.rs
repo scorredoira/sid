@@ -32,6 +32,9 @@ struct Setting {
     /// The key as `config.toml` writes it, dots and all.
     key: &'static str,
     kind: Kind,
+    /// What somebody would type looking for it, when that is not what it is called here:
+    /// searched in the command palette, never drawn. Empty where the label is enough.
+    also: &'static str,
 }
 
 /// The settings the screen offers. Everything else stays in `config.toml`, where the
@@ -40,34 +43,41 @@ const SETTINGS: &[Setting] = &[
     Setting {
         label: "The mode it opens in",
         key: "default-mode",
+        // Modal editing is what somebody looks for; "normal" is Helix's word for it.
         // What config.toml calls "normal" is modal editing, and that is what it is
         // called here: in sid the normal thing is to type.
         kind: Kind::Words(&[("insert", "insert"), ("normal", "modal")]),
+        also: "",
     },
     Setting {
         label: "Reopen the files a project had open",
         key: "restore-session",
         kind: Kind::Switch,
+        also: "",
     },
     Setting {
         label: "Wrap long lines",
         key: "soft-wrap.enable",
         kind: Kind::Switch,
+        also: "word wrap wordwrap soft wrap long lines",
     },
     Setting {
         label: "Save when you leave a file",
         key: "auto-save.focus-lost",
         kind: Kind::Switch,
+        also: "",
     },
     Setting {
         label: "Save while you type",
         key: "auto-save.after-delay.enable",
         kind: Kind::Switch,
+        also: "",
     },
     Setting {
         label: "Line numbers",
         key: "line-number",
         kind: Kind::Words(&[("absolute", "absolute"), ("relative", "relative")]),
+        also: "",
     },
     Setting {
         label: "Tabs for the open files",
@@ -77,11 +87,13 @@ const SETTINGS: &[Setting] = &[
             ("always", "always"),
             ("never", "never"),
         ]),
+        also: "",
     },
     Setting {
         label: "Indentation guides",
         key: "indent-guides.render",
         kind: Kind::Switch,
+        also: "",
     },
     Setting {
         label: "The cursor while typing",
@@ -91,36 +103,43 @@ const SETTINGS: &[Setting] = &[
             ("block", "block"),
             ("underline", "underline"),
         ]),
+        also: "",
     },
     Setting {
         label: "The cursor blinks",
         key: "cursor-blink",
         kind: Kind::Switch,
+        also: "",
     },
     Setting {
         label: "Highlight the line the cursor is on",
         key: "cursorline",
         kind: Kind::Switch,
+        also: "",
     },
     Setting {
         label: "The mode colours the status line",
         key: "color-modes",
         kind: Kind::Switch,
+        also: "",
     },
     Setting {
         label: "The picker obeys .gitignore",
         key: "file-picker.git-ignore",
         kind: Kind::Switch,
+        also: "",
     },
     Setting {
         label: "The file tree hides files that start with a dot",
         key: "file-explorer.hidden",
         kind: Kind::Switch,
+        also: "",
     },
     Setting {
         label: "The mouse",
         key: "mouse",
         kind: Kind::Switch,
+        also: "",
     },
 ];
 
@@ -206,10 +225,34 @@ impl Settings {
 /// words the settings screen uses, so a shortcut for it says something.
 pub(crate) fn told(key: &str) -> Option<String> {
     let setting = SETTINGS.iter().find(|setting| setting.key == key)?;
-    Some(match setting.kind {
+    Some(said(setting))
+}
+
+fn said(setting: &Setting) -> String {
+    match setting.kind {
         Kind::Switch => format!("{}, on or off", setting.label),
         Kind::Words(_) => format!("{}, the next one", setting.label),
-    })
+    }
+}
+
+/// The other words somebody might look for a setting by, for the palette to search and
+/// never show.
+pub(crate) fn also(key: &str) -> &'static str {
+    SETTINGS
+        .iter()
+        .find(|setting| setting.key == key)
+        .map(|setting| setting.also)
+        .unwrap_or_default()
+}
+
+/// Every setting as the command that flips it, for the command palette: the screen's
+/// settings are things the editor does, so they are looked for and given keys like
+/// anything else it does.
+pub(crate) fn as_commands() -> Vec<(String, String)> {
+    SETTINGS
+        .iter()
+        .map(|setting| (setting.key.to_string(), said(setting)))
+        .collect()
 }
 
 /// What a setting is set to right now.
