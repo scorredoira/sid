@@ -130,6 +130,8 @@ pub struct Outline {
     pub focused: bool,
     /// The row of the definition the editor's cursor is inside, the innermost.
     current: Option<usize>,
+    /// What the rows are narrowed to while the filter box is open.
+    filter: Option<String>,
 }
 
 impl Outline {
@@ -162,6 +164,23 @@ impl Outline {
             can_outline: false,
             focused: false,
             current: None,
+            filter: None,
+        }
+    }
+
+    pub fn filter(&self) -> Option<&str> {
+        self.filter.as_deref()
+    }
+
+    /// Opens the filter box, or narrows the rows to the definitions whose name contains
+    /// `text` while it is open; `None` closes it and the whole outline comes back.
+    pub fn set_filter(&mut self, editor: &mut Editor, text: Option<String>) {
+        let closing = text.is_none() && self.filter.is_some();
+        self.filter = text;
+        self.rebuild(editor);
+        // The rows are back: the definition the cursor is inside is marked again.
+        if closing {
+            self.current = None;
         }
     }
 
@@ -555,6 +574,8 @@ impl TabView for Outline {
     fn empty_message(&self) -> Option<Message> {
         let text = if !self.can_outline {
             "no outline for this file"
+        } else if self.filter.as_deref().is_some_and(|text| !text.is_empty()) {
+            "nothing named like that"
         } else if self.layout.only_functions && !self.symbols.is_empty() {
             "no functions or methods here"
         } else {
@@ -569,28 +590,9 @@ impl TabView for Outline {
     /// Lays the rows out from the definitions held; the cursor stays on its definition
     /// when the order or the file changed under it.
     fn rebuild(&mut self, _editor: &mut Editor) {
-        let selected = match self.rows.get(self.list.cursor) {
-            Some(Row::Symbol(symbol)) => Some((symbol.name.clone(), symbol.kind, symbol.start)),
-            _ => None,
-        };
-        let listed: Vec<&Symbol> = self
-            .symbols
-            .iter()
-            .filter(|symbol| !self.layout.only_functions || is_callable(symbol.kind))
-            .collect();
-        self.rows = if self.layout.by_name {
-            named_rows(&listed)
-        } else {
-            nested_rows(&listed)
-        };
-        self.list.set_len(self.rows.len());
-        let found = selected.and_then(|(name, kind, start)| reselect(&self.rows, &name, kind, start));
-        if let Some(index) = found {
-            self.list.select(index);
-        }
+        self.rebuild_rows();
     }
 
-    /// F5: the definitions are read again now, and the server asked again.
     fn refresh(&mut self, cx: &mut TabContext) {
         self.read_from = None;
         self.wanted = None;
@@ -615,6 +617,43 @@ impl TabView for Outline {
         doc.set_selection(view.id, Selection::point(start));
         align_view(doc, view, Align::Center);
         Outcome::Leave
+    }
+}
+
+impl Outline {
+    /// The rows from the definitions held, narrowed to what the filter names and to what
+    /// is called when only that is listed, in the file's order or by name.
+    fn rebuild_rows(&mut self) {
+        let selected = match self.rows.get(self.list.cursor) {
+            Some(Row::Symbol(symbol)) => Some((symbol.name.clone(), symbol.kind, symbol.start)),
+            _ => None,
+        };
+        let filter = self
+            .filter
+            .as_deref()
+            .filter(|text| !text.is_empty())
+            .map(str::to_lowercase);
+        let listed: Vec<&Symbol> = self
+            .symbols
+            .iter()
+            .filter(|symbol| !self.layout.only_functions || is_callable(symbol.kind))
+            .filter(|symbol| {
+                filter
+                    .as_deref()
+                    .is_none_or(|text| symbol.name.to_lowercase().contains(text))
+            })
+            .collect();
+        self.rows = if self.layout.by_name {
+            named_rows(&listed)
+        } else {
+            nested_rows(&listed)
+        };
+        self.list.set_len(self.rows.len());
+        let found =
+            selected.and_then(|(name, kind, start)| reselect(&self.rows, &name, kind, start));
+        if let Some(index) = found {
+            self.list.select(index);
+        }
     }
 }
 
@@ -721,6 +760,36 @@ mod tests {
         assert_eq!(reselect(&rows, "new", "method", 190), Some(3));
         assert_eq!(reselect(&rows, "new", "method", 12), Some(1));
         assert_eq!(reselect(&rows, "new", "function", 12), None);
+    }
+
+    #[test]
+    fn a_filter_keeps_the_definitions_named_like_it() {
+        let mut outline = Outline::with_layout(OutlineLayout {
+            only_functions: false,
+            ..OutlineLayout::default()
+        });
+        outline.can_outline = true;
+        outline.symbols = vec![
+            symbol("Shape", "class", 0, 100),
+            symbol("area", "method", 10, 40),
+            symbol("Area2", "function", 120, 150),
+        ];
+        outline.filter = Some("ARE".to_string());
+        outline.rebuild_rows();
+        assert_eq!(
+            names(&outline.rows),
+            vec![("area".to_string(), 0), ("Area2".to_string(), 0)]
+        );
+        outline.filter = Some("zzz".to_string());
+        outline.rebuild_rows();
+        assert!(outline.rows.is_empty());
+        assert_eq!(
+            outline.empty_message().unwrap().text,
+            "nothing named like that"
+        );
+        outline.filter = None;
+        outline.rebuild_rows();
+        assert_eq!(outline.rows.len(), 3);
     }
 
     #[test]

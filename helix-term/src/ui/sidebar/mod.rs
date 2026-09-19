@@ -881,8 +881,12 @@ impl Sidebar {
     pub fn handle_key(&mut self, key: KeyEvent, cx: &mut commands::Context) -> EventResult {
         let editor = &mut cx.editor;
         // Inside a commit's files the keys are the files' own; the filter is the history's.
-        // The outline has no filter box: typing walks it as it walks the tree.
-        let filters = !self.lower_focused() && self.tab != TabKind::Changes;
+        // The tree and the outline each have a box of their own.
+        let filters = match self.tab {
+            TabKind::Files => true,
+            TabKind::Commits => !self.lower_focused(),
+            TabKind::Changes => false,
+        };
         if filters {
             if let Some(result) = self.handle_filter_key(key, editor) {
                 return result;
@@ -990,10 +994,10 @@ impl Sidebar {
         EventResult::Consumed(None)
     }
 
-    /// The filter box of the Files and Commits tabs: `/` opens it, what is typed narrows
-    /// the rows, Backspace takes a letter back, and Esc clears it and brings the whole tree
-    /// or history back. Answers only for the keys the box takes. The key carries no
-    /// modifier, so nothing the editor's shortcuts do is shadowed while the tree has the
+    /// The filter box of the tree, the outline and the history: `/` opens it, what is
+    /// typed narrows the rows, Backspace takes a letter back, and Esc clears it and brings
+    /// the whole list back. Answers only for the keys the box takes. The key carries no
+    /// modifier, so nothing the editor's shortcuts do is shadowed while the list has the
     /// focus; once the box is open a typed `/` is text like any other letter.
     fn handle_filter_key(&mut self, key: KeyEvent, editor: &mut Editor) -> Option<EventResult> {
         let text = self.filter().map(str::to_string);
@@ -1005,7 +1009,7 @@ impl Sidebar {
                 self.set_filter(editor, None);
                 // The folds are back as they were, so the file opened from a match is
                 // revealed again at the next render.
-                if self.tab == TabKind::Files {
+                if self.tab == TabKind::Files && !self.outline.focused {
                     self.revealed = None;
                 }
             }
@@ -1022,9 +1026,10 @@ impl Sidebar {
         Some(EventResult::Consumed(None))
     }
 
-    /// The active tab's filter box, when it has one and it is open.
+    /// The filter box of the list that has the keys, when it has one and it is open.
     fn filter(&self) -> Option<&str> {
         match self.tab {
+            TabKind::Files if self.outline.focused => self.outline.filter(),
             TabKind::Files => self.files.filter(),
             TabKind::Commits => self.commits.filter(),
             TabKind::Changes => None,
@@ -1033,6 +1038,7 @@ impl Sidebar {
 
     fn set_filter(&mut self, editor: &mut Editor, text: Option<String>) {
         match self.tab {
+            TabKind::Files if self.outline.focused => self.outline.set_filter(editor, text),
             TabKind::Files => self.files.set_filter(editor, text),
             TabKind::Commits => self.commits.set_filter(editor, text),
             TabKind::Changes => {}
@@ -1114,7 +1120,9 @@ impl Sidebar {
             MouseEventKind::Down(MouseButton::Left) if on_sort_label => {
                 self.toggle_outline_sort(editor);
             }
-            MouseEventKind::Down(MouseButton::Left) if rule.is_some_and(|rule| rule.under(event)) => {
+            MouseEventKind::Down(MouseButton::Left)
+                if rule.is_some_and(|rule| rule.under(event)) =>
+            {
                 self.resizing_split = true;
             }
             MouseEventKind::Drag(MouseButton::Left) if self.resizing_split => {
