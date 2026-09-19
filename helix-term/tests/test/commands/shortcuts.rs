@@ -158,6 +158,104 @@ async fn a_selection_made_while_typing_is_replaced_by_typing() -> anyhow::Result
     Ok(())
 }
 
+/// Shift-F1 end to end: a key given there is written to config.toml and runs at once;
+/// taken away from the row's menu it is gone; given back to sid, sid's own key runs
+/// again and nothing of ours is left in the file; and Ctrl-Z on the screen puts the
+/// file back as it was before the last change made there.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_shortcuts_screen_writes_config_toml_and_the_editor_runs_what_it_wrote(
+) -> anyhow::Result<()> {
+    let directory = tempfile::tempdir()?;
+    helix_loader::initialize_config_file(Some(directory.path().join("config.toml")));
+    let path = helix_loader::config_file();
+    let written = || std::fs::read_to_string(&path).unwrap_or_default();
+
+    let mut config = helpers::test_config();
+    config.keys = helix_term::config::default_keys();
+    let mut app = AppBuilder::new()
+        .with_config(config)
+        .with_input_text("#[a|]#bc")
+        .build()?;
+
+    test_key_sequences(
+        &mut app,
+        vec![
+            // The action found by name, Enter, the keys, Enter: the line is written under
+            // the modal tables, and the key it had is left doing nothing.
+            (
+                Some("<S-F1>switch_case<ret><C-A-j><ret><esc>"),
+                Some(&|_| {
+                    let written = written();
+                    assert!(
+                        written.contains("[keys.normal]\nA-C-j = \"switch_case\""),
+                        "{written}"
+                    );
+                    assert!(
+                        written.contains("[keys.select]\nA-C-j = \"switch_case\""),
+                        "{written}"
+                    );
+                    assert!(written.contains("\"~\" = \"no_op\""), "{written}");
+                }),
+            ),
+            // And the editor runs it without being restarted.
+            (
+                Some("<C-A-j>"),
+                Some(&|app| {
+                    assert_eq!(helix_view::doc!(app.editor).text().to_string(), "Abc");
+                }),
+            ),
+            // Taken away from the row's menu: our line is gone, sid's key stays off.
+            (
+                Some("<S-F1>switch_case<S-F10><down><ret><esc>"),
+                Some(&|_| {
+                    let written = written();
+                    assert!(!written.contains("switch_case"), "{written}");
+                    assert!(written.contains("\"~\" = \"no_op\""), "{written}");
+                }),
+            ),
+            (
+                Some("<C-A-j>"),
+                Some(&|app| {
+                    assert_eq!(helix_view::doc!(app.editor).text().to_string(), "Abc");
+                }),
+            ),
+            // Given back to sid by what it runs, keys or no keys: nothing of ours is left.
+            (
+                Some("<S-F1>switch_case<S-F10><down><ret><esc>"),
+                Some(&|_| {
+                    let written = written();
+                    assert!(!written.contains("keys"), "{written}");
+                }),
+            ),
+            (
+                Some("~"),
+                Some(&|app| {
+                    assert_eq!(helix_view::doc!(app.editor).text().to_string(), "abc");
+                }),
+            ),
+            // A change made on the screen is undone there with Ctrl-Z.
+            (
+                Some("<S-F1>switch_case<ret><C-A-k><ret><C-z><esc>"),
+                Some(&|_| {
+                    let written = written();
+                    assert!(!written.contains("switch_case"), "{written}");
+                    assert!(!written.contains("no_op"), "{written}");
+                }),
+            ),
+            (
+                Some("~"),
+                Some(&|app| {
+                    assert_eq!(helix_view::doc!(app.editor).text().to_string(), "Abc");
+                }),
+            ),
+        ],
+        false,
+    )
+    .await?;
+
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_cmd_key_nobody_bound_writes_nothing() -> anyhow::Result<()> {
     test(("#[a|]#", "i<Cmd-c>x<C-b>y<esc>", "xy#[|a]#")).await?;

@@ -3776,7 +3776,7 @@ fn palette_commands() -> impl Iterator<Item = MappableCommand> {
         .chain(
             crate::ui::settings::as_commands()
                 .into_iter()
-                .map(|(key, doc)| MappableCommand::Typable {
+                .map(|(key, doc, _)| MappableCommand::Typable {
                     name: "toggle-option".to_owned(),
                     args: key,
                     doc,

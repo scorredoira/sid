@@ -311,11 +311,12 @@ pub(crate) fn also(args: &str) -> &'static str {
 
 /// Every setting as the command that flips it, for the command palette: the screen's
 /// settings are things the editor does, so they are looked for and given keys like
-/// anything else it does.
-pub(crate) fn as_commands() -> Vec<(String, String)> {
+/// anything else it does. With what `:toggle-option` is given, what it reads as, and
+/// the other words it answers to.
+pub(crate) fn as_commands() -> Vec<(String, String, String)> {
     SETTINGS
         .iter()
-        .map(|setting| (given(setting), said(setting)))
+        .map(|setting| (given(setting), said(setting), setting.also.to_string()))
         .collect()
 }
 
@@ -621,7 +622,7 @@ mod tests {
 
     #[test]
     fn a_setting_of_a_few_words_is_given_them_or_it_cannot_be_flipped() {
-        for (args, doc) in as_commands() {
+        for (args, doc, _) in as_commands() {
             let command: crate::commands::MappableCommand =
                 format!(":toggle-option {args}").parse().unwrap();
             let crate::commands::MappableCommand::Typable { args, .. } = &command else {

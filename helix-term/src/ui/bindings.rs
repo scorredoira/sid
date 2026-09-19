@@ -137,6 +137,15 @@ pub fn written(command: &MappableCommand) -> String {
     }
 }
 
+/// What a leaf of the keymap runs, as config.toml would write it. A node runs nothing.
+pub fn runs_of(trie: &KeyTrie) -> Option<Runs> {
+    match trie {
+        KeyTrie::MappableCommand(command) => Some(Runs::of(command)),
+        KeyTrie::Sequence(commands) => Some(Runs::Many(commands.iter().map(written).collect())),
+        KeyTrie::Node(_) => None,
+    }
+}
+
 /// What a shortcut does, in words, as the screen says it.
 pub fn describes(trie: &KeyTrie) -> String {
     match trie {
@@ -150,22 +159,19 @@ pub fn describes(trie: &KeyTrie) -> String {
     }
 }
 
-/// Walks a keymap gathering every shortcut in it, as keys and what they run.
+/// Walks a keymap gathering every shortcut in it, as keys and what they run. Every one
+/// of them, whether or not this terminal sends its keys: whoever reads the list decides
+/// whether a key that never arrives is shown as such or left out.
 pub fn walk(
     trie: &KeyTrie,
     path: &mut Vec<KeyEvent>,
-    enhanced: bool,
     found: &mut Vec<(Vec<KeyEvent>, Runs, String)>,
 ) {
     match trie {
         KeyTrie::Node(node) => {
             for (key, child) in node.iter() {
-                // A key this terminal never sends is not a shortcut here.
-                if !crate::keymap::key_reaches(key, enhanced) {
-                    continue;
-                }
                 path.push(*key);
-                walk(child, path, enhanced, found);
+                walk(child, path, found);
                 path.pop();
             }
         }
@@ -192,19 +198,28 @@ pub type ByAction = HashMap<Runs, Vec<Vec<KeyEvent>>>;
 /// same command, and they would all show the first one's keys.
 pub fn by_action(map: &KeyTrie, enhanced: bool) -> ByAction {
     let mut found = Vec::new();
-    walk(map, &mut Vec::new(), enhanced, &mut found);
+    walk(map, &mut Vec::new(), &mut found);
     let mut by_action = ByAction::new();
     for (keys, runs, _) in found {
-        by_action.entry(runs).or_default().push(keys);
+        // A key this terminal never sends is not a shortcut here.
+        if reaches(&keys, enhanced) {
+            by_action.entry(runs).or_default().push(keys);
+        }
     }
     by_action
+}
+
+/// Whether every key of a shortcut reaches the editor in this terminal.
+pub fn reaches(keys: &[KeyEvent], enhanced: bool) -> bool {
+    keys.iter()
+        .all(|key| crate::keymap::key_reaches(key, enhanced))
 }
 
 /// What stands in the way of giving a key to an action.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Clash {
     /// The keys are already another action's, which would lose them.
-    Taken { what: String },
+    Taken { what: String, runs: Runs },
     /// The keys begin other shortcuts, which taking them would end.
     Begins { count: usize, first: String },
     /// An earlier key of the sequence already runs something, so the rest is never reached.
@@ -219,7 +234,7 @@ impl Clash {
     /// The one line the capture box shows about it.
     pub fn says(&self, keys: &str) -> String {
         match self {
-            Clash::Taken { what } => format!("{keys} is now «{what}»."),
+            Clash::Taken { what, .. } => format!("{keys} is now «{what}»."),
             Clash::Begins { count, first } => {
                 format!("{keys} begins {count} shortcuts, «{first}» among them.")
             }
@@ -326,6 +341,7 @@ pub fn clash(
                 if !matches!(trie, KeyTrie::MappableCommand(command) if command.name() == "no_op") {
                     return Some(Clash::Taken {
                         what: describes(trie),
+                        runs: runs_of(trie).expect("a command or a sequence runs something"),
                     });
                 }
             }
@@ -345,36 +361,46 @@ pub fn clash(
 /// Puts a shortcut into a keymap held in memory, so the screen shows the change at once.
 pub fn set(maps: &mut HashMap<Mode, KeyTrie>, place: Where, keys: &[KeyEvent], trie: &KeyTrie) {
     for mode in place.modes() {
-        let Some(map) = maps.get_mut(&mode) else {
-            continue;
-        };
-        let Some((last, path)) = keys.split_last() else {
-            continue;
-        };
-        let mut node = match map {
-            KeyTrie::Node(node) => node,
-            _ => continue,
-        };
-        for key in path {
-            let child = node
-                .entry(*key)
-                .or_insert_with(|| KeyTrie::Node(KeyTrieNode::default()));
-            // A key that ran a command becomes the start of a sequence instead.
-            if child.node().is_none() {
-                *child = KeyTrie::Node(KeyTrieNode::default());
-            }
-            node = child.node_mut().expect("it was just made a node");
+        if let Some(map) = maps.get_mut(&mode) {
+            set_in(map, keys, trie);
         }
-        node.insert(*last, trie.clone());
     }
+}
+
+/// Puts a shortcut into one mode's keymap.
+pub fn set_in(map: &mut KeyTrie, keys: &[KeyEvent], trie: &KeyTrie) {
+    let Some((last, path)) = keys.split_last() else {
+        return;
+    };
+    let mut node = match map {
+        KeyTrie::Node(node) => node,
+        _ => return,
+    };
+    for key in path {
+        let child = node
+            .entry(*key)
+            .or_insert_with(|| KeyTrie::Node(KeyTrieNode::default()));
+        // A key that ran a command becomes the start of a sequence instead.
+        if child.node().is_none() {
+            *child = KeyTrie::Node(KeyTrieNode::default());
+        }
+        node = child.node_mut().expect("it was just made a node");
+    }
+    node.insert(*last, trie.clone());
 }
 
 /// Takes a shortcut out of a keymap held in memory.
 pub fn unset(maps: &mut HashMap<Mode, KeyTrie>, place: Where, keys: &[KeyEvent]) {
     for mode in place.modes() {
-        let Some(KeyTrie::Node(node)) = maps.get_mut(&mode) else {
-            continue;
-        };
+        if let Some(map) = maps.get_mut(&mode) {
+            unset_in(map, keys);
+        }
+    }
+}
+
+/// Takes a shortcut out of one mode's keymap.
+pub fn unset_in(map: &mut KeyTrie, keys: &[KeyEvent]) {
+    if let KeyTrie::Node(node) = map {
         drop_at(node, keys);
     }
 }
@@ -407,60 +433,32 @@ pub fn erase(path: &Path, place: Where, keys: &[KeyEvent], is_sids: bool) -> any
     edit(path, place, keys, value)
 }
 
-/// Gives the keys back to sid: your line for them is dropped, whatever it said.
-pub fn restore(path: &Path, place: Where, keys: &[KeyEvent]) -> anyhow::Result<()> {
-    edit(path, place, keys, None)
-}
+/// Every table `config.toml` keeps shortcuts under.
+pub const TABLES: [&str; 4] = ["all", "normal", "select", "insert"];
 
-/// Puts a value under every `[keys.<table>]` the place stands for, or takes the entry
-/// away when there is none. The file is read and written once, whatever it touches.
-fn edit(
-    path: &Path,
-    place: Where,
-    keys: &[KeyEvent],
-    value: Option<toml_edit::Value>,
-) -> anyhow::Result<()> {
-    let (last, chord) = keys
-        .split_last()
-        .context("a shortcut has at least one key")?;
-
-    let text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(err) => return Err(err).with_context(|| format!("reading {}", path.display())),
-    };
-    let mut document: toml_edit::DocumentMut = text
-        .parse()
-        .with_context(|| format!("{} is not valid TOML", path.display()))?;
-
-    for table in place.tables() {
-        // Every shortcut lives under [keys.<table>], and a chord is a table per key.
-        let mut names = vec!["keys".to_string(), table.to_string()];
-        names.extend(chord.iter().map(ToString::to_string));
-        let (names, last) = as_spelt(&document, &names, &last.to_string());
-        put(&mut document, path, &names, &last, &value)?;
-    }
-    // A key given to every mode is taken from the modes that had it: [keys.all] is laid
-    // under each mode's own table, so a line of yours under [keys.normal] would still
-    // win over the one just written, and the key would go on doing the old thing there.
-    if place == Where::Anywhere {
-        for table in TABLES.iter().skip(1) {
+/// Gives shortcuts back to sid: your lines for the keys are dropped from the tables named
+/// with them, whatever they said, and what sid ships for them is what is left. Says
+/// whether there was anything of yours to drop.
+pub fn restore(path: &Path, lines: &[(Vec<KeyEvent>, Vec<&'static str>)]) -> anyhow::Result<bool> {
+    let mut document = read(path)?;
+    let before = document.to_string();
+    for (keys, tables) in lines {
+        let (last, chord) = keys
+            .split_last()
+            .context("a shortcut has at least one key")?;
+        for table in tables {
             let mut names = vec!["keys".to_string(), table.to_string()];
             names.extend(chord.iter().map(ToString::to_string));
             let (names, last) = as_spelt(&document, &names, &last.to_string());
             prune(document.as_table_mut(), &names, &last);
         }
     }
-
-    crate::ui::settings::write_atomically(path, document.to_string())
+    save(path, before, document)
 }
 
-/// Every table `config.toml` keeps shortcuts under.
-pub const TABLES: [&str; 4] = ["all", "normal", "select", "insert"];
-
 /// The path as the file spells it: the tables by name, and each key by whatever spelling
-/// of it the file has, so "C-A-j" finds a line you wrote as "A-C-j". A key the file does
-/// not have keeps the spelling it was asked for by.
+/// of it the file has, so "C-A-j" finds a line you wrote as "A-C-j" or "ctrl-alt-j".
+/// A key the file does not have keeps the spelling it was asked for by.
 fn as_spelt(
     document: &toml_edit::DocumentMut,
     names: &[String],
@@ -497,6 +495,64 @@ fn spelling(table: &dyn toml_edit::TableLike, key: &str) -> String {
         .find(|name| name.parse::<KeyEvent>().ok() == Some(wanted))
         .map(String::from)
         .unwrap_or_else(|| key.to_string())
+}
+
+/// The user's `config.toml` as it is, or nothing at all when there is none yet.
+fn read(path: &Path) -> anyhow::Result<toml_edit::DocumentMut> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(err).with_context(|| format!("reading {}", path.display())),
+    };
+    text.parse()
+        .with_context(|| format!("{} is not valid TOML", path.display()))
+}
+
+/// Writes the file back, unless nothing in it changed, and says whether it did.
+fn save(path: &Path, before: String, document: toml_edit::DocumentMut) -> anyhow::Result<bool> {
+    let after = document.to_string();
+    if after == before {
+        return Ok(false);
+    }
+    crate::ui::settings::write_atomically(path, after)?;
+    Ok(true)
+}
+
+/// Puts a value under every `[keys.<table>]` the place stands for, or takes the entry
+/// away when there is none. The file is read and written once, whatever it touches.
+fn edit(
+    path: &Path,
+    place: Where,
+    keys: &[KeyEvent],
+    value: Option<toml_edit::Value>,
+) -> anyhow::Result<()> {
+    let (last, chord) = keys
+        .split_last()
+        .context("a shortcut has at least one key")?;
+
+    let mut document = read(path)?;
+    let before = document.to_string();
+
+    for table in place.tables() {
+        // Every shortcut lives under [keys.<table>], and a chord is a table per key.
+        let mut names = vec!["keys".to_string(), table.to_string()];
+        names.extend(chord.iter().map(ToString::to_string));
+        let (names, last) = as_spelt(&document, &names, &last.to_string());
+        put(&mut document, path, &names, &last, &value)?;
+    }
+    // A key given to every mode is taken from the modes that had it: [keys.all] is laid
+    // under each mode's own table, so a line of yours under [keys.normal] would still
+    // win over the one just written, and the key would go on doing the old thing there.
+    if place == Where::Anywhere {
+        for table in TABLES.iter().skip(1) {
+            let mut names = vec!["keys".to_string(), table.to_string()];
+            names.extend(chord.iter().map(ToString::to_string));
+            let (names, last) = as_spelt(&document, &names, &last.to_string());
+            prune(document.as_table_mut(), &names, &last);
+        }
+    }
+
+    save(path, before, document).map(drop)
 }
 
 /// One entry written, or dropped when there is no value for it.
@@ -542,17 +598,10 @@ fn put(
 /// Gives every shortcut back to sid: your whole `[keys]` is dropped, and nothing else in
 /// the file is touched.
 pub fn restore_all(path: &Path) -> anyhow::Result<()> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(err) => return Err(err).with_context(|| format!("reading {}", path.display())),
-    };
-    let mut document: toml_edit::DocumentMut = text
-        .parse()
-        .with_context(|| format!("{} is not valid TOML", path.display()))?;
+    let mut document = read(path)?;
+    let before = document.to_string();
     document.as_table_mut().remove("keys");
-
-    crate::ui::settings::write_atomically(path, document.to_string())
+    save(path, before, document).map(drop)
 }
 
 /// Drops an entry and every table left empty above it: taking your last shortcut away
@@ -583,24 +632,30 @@ fn implicit() -> toml_edit::Item {
     toml_edit::Item::Table(table)
 }
 
-/// Every command the editor has, each as `config.toml` would name it, with what it does.
-pub fn catalogue() -> Vec<(Runs, String)> {
+/// Every command the editor has, each as `config.toml` would name it, with what it does
+/// and the other words somebody might look for it by. Only what a key can run on its own
+/// is here: a command that has to be given something, like `:theme` or `:set-option`,
+/// would answer "Bad arguments" to a shortcut, and doing nothing is not an action.
+pub fn catalogue() -> Vec<(Runs, String, String)> {
     let statics = MappableCommand::STATIC_COMMAND_LIST
         .iter()
-        .map(|command| (Runs::of(command), command.doc().to_string()));
+        .filter(|command| command.name() != "no_op")
+        .map(|command| (Runs::of(command), command.doc().to_string(), String::new()));
     let typables = crate::commands::typed::TYPABLE_COMMAND_LIST
         .iter()
+        .filter(|command| command.signature.positionals.0 == 0)
         .map(|command| {
             (
                 Runs::One(format!(":{}", command.name)),
                 command.doc.to_string(),
+                String::new(),
             )
         });
     // Flipping a setting is something the editor does, and so something a key can reach:
     // it is offered here under the words the settings screen uses for it.
     let settings = super::settings::as_commands()
         .into_iter()
-        .map(|(key, doc)| (Runs::One(format!(":toggle-option {key}")), doc));
+        .map(|(key, doc, also)| (Runs::One(format!(":toggle-option {key}")), doc, also));
 
     statics.chain(typables).chain(settings).collect()
 }
@@ -738,31 +793,6 @@ mod tests {
     }
 
     #[test]
-    fn enter_tab_backspace_and_delete_type_too() {
-        let maps = maps("");
-        for key in ["ret", "tab", "backspace", "del"] {
-            assert_eq!(
-                clash(&maps, Where::Anywhere, &keys(key), true),
-                Some(Clash::Text),
-                "{key}"
-            );
-        }
-        // Held with something they are shortcuts; out of insert they are keys like any.
-        assert!(clash(&maps, Where::Anywhere, &keys("S-del"), true).is_none());
-        assert!(clash(&maps, Where::Anywhere, &keys("C-ret"), true).is_none());
-        assert!(clash(
-            &maps,
-            Where::Modal {
-                normal: true,
-                select: true
-            },
-            &keys("ret"),
-            true
-        )
-        .is_none());
-    }
-
-    #[test]
     fn a_key_given_to_every_mode_is_taken_from_the_modes_that_had_it() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
@@ -828,10 +858,72 @@ mod tests {
         assert!(written.contains("goto_word"), "{written}");
 
         // The last one out takes the table with it, and [keys] as well.
-        restore(&path, normal, &keys("space w")).unwrap();
+        restore(&path, &[(keys("space w"), vec!["normal"])]).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(!written.contains("keys"), "{written}");
         assert!(written.contains("theme = \"github_dark\""));
+    }
+
+    #[test]
+    fn giving_back_drops_your_lines_from_every_table_it_is_told() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[keys.all]\nC-s = \"no_op\"\nC-A-j = \":write\"\n\n[keys.insert]\nC-s = \"select_all\"\n",
+        )
+        .unwrap();
+
+        restore(
+            &path,
+            &[
+                (keys("C-s"), TABLES.to_vec()),
+                (keys("C-A-j"), TABLES.to_vec()),
+            ],
+        )
+        .unwrap();
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(written.trim(), "", "{written}");
+    }
+
+    #[test]
+    fn enter_tab_backspace_and_delete_type_too() {
+        let maps = maps("");
+        for key in ["ret", "tab", "backspace", "del"] {
+            assert_eq!(
+                clash(&maps, Where::Anywhere, &keys(key), true),
+                Some(Clash::Text),
+                "{key}"
+            );
+        }
+        // Held with something they are shortcuts; out of insert they are keys like any.
+        assert!(clash(&maps, Where::Anywhere, &keys("S-del"), true).is_none());
+        assert!(clash(&maps, Where::Anywhere, &keys("C-ret"), true).is_none());
+        assert!(clash(
+            &maps,
+            Where::Modal {
+                normal: true,
+                select: true
+            },
+            &keys("ret"),
+            true
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn the_catalogue_offers_only_what_a_key_can_run_on_its_own() {
+        let offered: Vec<_> = catalogue().into_iter().map(|(runs, _, _)| runs).collect();
+        for bare in [":set-option", ":toggle-option", "no_op"] {
+            assert!(
+                !offered.contains(&Runs::One(bare.into())),
+                "{bare} needs to be given something, or does nothing"
+            );
+        }
+        assert!(offered.contains(&Runs::One(":write".into())));
+        assert!(offered.contains(&Runs::One("duplicate_line".into())));
+        assert!(offered.contains(&Runs::One(":toggle-option soft-wrap.enable".into())));
     }
 
     #[test]
@@ -888,7 +980,7 @@ mod tests {
             .unwrap()
             .contains("C-s = \"no_op\""));
 
-        restore(&path, Where::Insert, &keys("space h")).unwrap();
+        restore(&path, &[(keys("space h"), vec!["insert"])]).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(!written.contains("keys.insert"), "{written}");
         assert!(written.contains("A-C-j = \"duplicate_line\""));
