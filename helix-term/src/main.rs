@@ -57,7 +57,7 @@ FLAGS:
     -h, --help                     Print help information
     --strict                       Bail on error for commands that can fail.
     --tutor                        Load the tutorial
-    --changes                      Open on the Changes tab, what git sees changed; outside a git
+    -C, --changes                  Open on the Changes tab, what git sees changed; outside a git
                                    repository the editor says so and does not start
     --health [CATEGORY]            Check for potential errors in editor setup
                                    CATEGORY can be a language or one of 'clipboard', 'languages',

@@ -106,6 +106,7 @@ impl Args {
                             'v' => args.verbosity += 1,
                             'V' => args.display_version = true,
                             'h' => args.display_help = true,
+                            'C' => args.changes = true,
                             _ => anyhow::bail!("unexpected short arg {}", chr),
                         }
                     }
