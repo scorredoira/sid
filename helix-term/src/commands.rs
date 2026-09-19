@@ -6711,71 +6711,86 @@ fn move_lines_down(cx: &mut Context) {
 }
 
 /// Swaps the lines the selection touches with the line over or under them, and takes the
-/// selection along. It moves the whole span at once: carets on lines far apart walking
-/// past each other is not something anybody asks for, and it is not one transaction.
+/// selection along. Carets on lines apart move their own lines, each block of touching
+/// lines swapping with the one beside it, in one transaction; the lines between stay.
+/// When one block has nowhere to go - the first at the top, the last at the bottom -
+/// nothing moves, so the blocks keep their distance.
 fn move_lines(cx: &mut Context, direction: Direction) {
     let blocks = line_blocks(cx.editor);
     let (view, doc) = current!(cx.editor);
     let text = doc.text().slice(..);
     let ending = doc.line_ending.as_str();
 
-    let Some(from) = blocks.iter().map(|block| block.from()).min() else {
-        return;
-    };
-    let Some(to) = blocks.iter().map(|block| block.to()).max() else {
-        return;
-    };
-
-    let first = text.char_to_line(from);
-    let last = text.char_to_line(to.saturating_sub(1));
-
-    // Where the line being swapped with runs, and nothing to do when there is none.
-    let (start, end) = match direction {
-        Direction::Backward if first > 0 => (text.line_to_char(first - 1), to),
-        Direction::Forward if last + 1 < text.len_lines() => {
-            (from, text.line_to_char((last + 2).min(text.len_lines())))
-        }
-        _ => return,
-    };
-
-    let block = text.slice(from..to).to_string();
-    let other = match direction {
-        Direction::Backward => text.slice(start..from).to_string(),
-        Direction::Forward => text.slice(to..end).to_string(),
-    };
-
-    // The file's last line has no ending: whichever half lands last keeps that, so the
-    // one that used to be last gives its ending to the one taking its place.
-    let mut moved_by = other.chars().count();
-    let (mut left, mut right) = match direction {
-        Direction::Backward => (block, other),
-        Direction::Forward => (other, block),
-    };
-    if !left.ends_with(ending) && right.ends_with(ending) {
-        right.truncate(right.len() - ending.len());
-        left.push_str(ending);
-        if direction == Direction::Forward {
-            moved_by += ending.chars().count();
+    // Blocks that touch are one block: adjacent lines swap with the same neighbour.
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    for block in blocks.iter() {
+        match spans.last_mut() {
+            Some(last) if last.1 >= block.from() => last.1 = last.1.max(block.to()),
+            _ => spans.push((block.from(), block.to())),
         }
     }
+    if spans.is_empty() {
+        return;
+    }
 
-    // The selection goes with the text it was on.
-    let shift = match direction {
-        Direction::Backward => -(moved_by as isize),
-        Direction::Forward => moved_by as isize,
-    };
+    // Each span, the stretch of text it changes, and how far its selection goes.
+    let mut changes = Vec::with_capacity(spans.len());
+    let mut shifts = Vec::with_capacity(spans.len());
+    for &(from, to) in &spans {
+        let first = text.char_to_line(from);
+        let last = text.char_to_line(to.saturating_sub(1));
+
+        // Where the line being swapped with runs, and nothing to do when there is none.
+        let (start, end) = match direction {
+            Direction::Backward if first > 0 => (text.line_to_char(first - 1), to),
+            Direction::Forward if last + 1 < text.len_lines() => {
+                (from, text.line_to_char((last + 2).min(text.len_lines())))
+            }
+            _ => return,
+        };
+
+        let block = text.slice(from..to).to_string();
+        let other = match direction {
+            Direction::Backward => text.slice(start..from).to_string(),
+            Direction::Forward => text.slice(to..end).to_string(),
+        };
+
+        // The file's last line has no ending: whichever half lands last keeps that, so
+        // the one that used to be last gives its ending to the one taking its place.
+        let mut moved_by = other.chars().count();
+        let (mut left, mut right) = match direction {
+            Direction::Backward => (block, other),
+            Direction::Forward => (other, block),
+        };
+        if !left.ends_with(ending) && right.ends_with(ending) {
+            right.truncate(right.len() - ending.len());
+            left.push_str(ending);
+            if direction == Direction::Forward {
+                moved_by += ending.chars().count();
+            }
+        }
+
+        let shift = match direction {
+            Direction::Backward => -(moved_by as isize),
+            Direction::Forward => moved_by as isize,
+        };
+        changes.push((start, end, Some(format!("{left}{right}").into())));
+        shifts.push(shift);
+    }
+
+    // The selection goes with the text it was on: each range by its own span's move.
     let selection = doc.selection(view.id).clone().transform(|range| {
+        let shift = spans
+            .iter()
+            .position(|&(from, to)| from <= range.from() && range.from() < to.max(from + 1))
+            .map_or(0, |span| shifts[span]);
         Range::new(
             range.anchor.saturating_add_signed(shift),
             range.head.saturating_add_signed(shift),
         )
     });
-    let moved = format!("{left}{right}");
-    let transaction = Transaction::change(
-        doc.text(),
-        std::iter::once((start, end, Some(moved.into()))),
-    )
-    .with_selection(selection);
+    let transaction =
+        Transaction::change(doc.text(), changes.into_iter()).with_selection(selection);
     doc.apply(&transaction, view.id);
 }
 

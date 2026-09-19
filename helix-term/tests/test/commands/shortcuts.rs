@@ -40,6 +40,50 @@ async fn moving_lines_preserves_the_final_line_ending() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn moving_lines_with_several_cursors_moves_each_block_on_its_own() -> anyhow::Result<()> {
+    for (before, keys, after) in [
+        // Two lines apart each swap with their own neighbour; the line between stays.
+        (
+            "#[a|]#\nb\n#(c|)#\nd\n",
+            "<C-down>",
+            "b\n#[a|]#\nd\n#(c|)#\n",
+        ),
+        ("a\n#[b|]#\nc\n#(d|)#\n", "<C-up>", "#[b|]#\na\n#(d|)#\nc\n"),
+        // Touching lines are one block.
+        (
+            "a\n#[b|]#\n#(c|)#\nd\n",
+            "<C-down>",
+            "a\nd\n#[b|]#\n#(c|)#\n",
+        ),
+        // One block with nowhere to go holds the others.
+        ("#[a|]#\nb\n#(c|)#\n", "<C-up>", "#[a|]#\nb\n#(c|)#\n"),
+        ("a\n#[b|]#\nc\n#(d|)#", "<C-down>", "a\n#[b|]#\nc\n#(d|)#"),
+        // The last line has no ending, and keeps it that way.
+        ("#[a|]#\nb\n#(c|)#\nd", "<C-down>", "b\n#[a|]#\nd\n#(c|)#"),
+    ] {
+        let mut config = helpers::test_config();
+        config.keys.insert(
+            Mode::Normal,
+            keymap!({"Normal mode"
+                "C-up" => move_lines_up,
+                "C-down" => move_lines_down,
+            }),
+        );
+        test_with_config(
+            AppBuilder::new().with_config(config),
+            (
+                before,
+                format!("<esc>{keys}"),
+                after,
+                LineFeedHandling::AsIs,
+            ),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 fn with_shortcuts() -> AppBuilder {
     let mut config = helpers::test_config();
     config.keys.insert(
