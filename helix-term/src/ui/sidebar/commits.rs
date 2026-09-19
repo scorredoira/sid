@@ -745,15 +745,11 @@ impl TabView for CommitsTab {
         };
         let in_history = !self.files_focused;
         match (row, how) {
-            // A double click on a commit opens the files it touched under the history, and
-            // closes them again: the same pane F9 shows, for the commit clicked. Enter
-            // opens them, as → opens what it is on, and never closes them.
-            (Row::Commit(_), Activation::Double) if in_history => {
+            // Enter or a double click on a commit opens the files it touched under the
+            // history, and pressed again closes them: the same pane F9 shows, for the
+            // commit the cursor is on.
+            (Row::Commit(_), Activation::Enter | Activation::Double) if in_history => {
                 self.toggle_files(cx);
-                Outcome::Stay
-            }
-            (Row::Commit(_), Activation::Enter) if in_history => {
-                self.set_files_visible(cx, true);
                 Outcome::Stay
             }
             (Row::Commit(row), _) if in_history => {
