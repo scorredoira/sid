@@ -92,7 +92,11 @@ async fn discarding_a_tracked_file_reloads_its_buffer() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn outline_follows_uncommitted_edits_and_undo() -> anyhow::Result<()> {
     use helix_core::Transaction;
-    use helix_term::ui::sidebar::{entries::Row, outline::Outline, tab::TabView};
+    use helix_term::ui::sidebar::{
+        entries::Row,
+        outline::{Outline, OutlineLayout},
+        tab::TabView,
+    };
     use helix_view::{current, doc_mut};
 
     fn names(outline: &Outline) -> Vec<&str> {
@@ -114,7 +118,8 @@ async fn outline_follows_uncommitted_edits_and_undo() -> anyhow::Result<()> {
         doc!(app.editor).syntax().is_some(),
         "Rust grammar must be available"
     );
-    let (mut outline, _) = Outline::new();
+    // Laid out here, not from the data directory of whoever runs the tests.
+    let mut outline = Outline::with_layout(OutlineLayout::default());
     // A file just switched to is read right away.
     outline.sync(&mut app.editor, false);
     assert_eq!(names(&outline), ["alpha"]);
