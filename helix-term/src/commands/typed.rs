@@ -2793,6 +2793,18 @@ fn toggle_option(
     };
 
     let status = format!("'{key}' is now set to {value}");
+
+    // A setting of the settings screen is a command: wherever it is flipped — there, in
+    // the palette, or with a key like Alt-z — it is written to config.toml, or the next
+    // sid would open without the change. What else this command can flip is Helix's,
+    // and stays for the session as it always has.
+    if crate::ui::settings::is_setting(key) {
+        let value = value.clone();
+        crate::ui::settings::flip(cx.editor, key, &value)?;
+        cx.editor.set_status(status);
+        return Ok(());
+    }
+
     let config = serde_json::from_value(config)
         .map_err(|err| anyhow::anyhow!("Failed to parse config: {err}"))?;
 

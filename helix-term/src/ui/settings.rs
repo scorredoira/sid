@@ -198,27 +198,35 @@ impl Settings {
             }
         };
 
-        if let Err(err) = apply(cx.editor, setting.key, &next) {
+        if let Err(err) = flip(cx.editor, setting.key, &next) {
             log::error!("Could not change '{}': {err:#}", setting.key);
-            cx.editor.set_error(format!("Could not change it: {err:#}"));
-            return;
-        }
-
-        // The mode it opens in is the one to be in now as well: changing it and waiting
-        // for the next file to be opened would read as the setting not working.
-        if setting.key == "default-mode" {
-            match &next {
-                Value::String(mode) if mode == "insert" => cx.editor.mode = Mode::Insert,
-                _ => cx.editor.enter_normal_mode(),
-            }
-        }
-
-        if let Err(err) = write_setting(&helix_loader::config_file(), setting.key, &next) {
-            log::error!("Could not write '{}' to config.toml: {err:#}", setting.key);
-            cx.editor
-                .set_error(format!("Changed, but not written down: {err:#}"));
+            cx.editor.set_error(format!("{err:#}"));
         }
     }
+}
+
+/// Puts a setting's new value in the running editor and writes it to `config.toml`: a
+/// setting is a command, and wherever it is flipped — this screen, the palette, a key —
+/// it is written. Only the settings this screen offers are: what else `:toggle-option`
+/// can flip is Helix's, and stays for the session as it always has.
+pub(crate) fn flip(editor: &mut Editor, key: &str, value: &Value) -> anyhow::Result<()> {
+    apply(editor, key, value).context("Could not change it")?;
+
+    // The mode it opens in is the one to be in now as well: changing it and waiting
+    // for the next file to be opened would read as the setting not working.
+    if key == "default-mode" {
+        match value {
+            Value::String(mode) if mode == "insert" => editor.mode = Mode::Insert,
+            _ => editor.enter_normal_mode(),
+        }
+    }
+
+    write_setting(&helix_loader::config_file(), key, value).context("Changed, but not written down")
+}
+
+/// Whether `:toggle-option <key>` flips one of the settings of this screen.
+pub(crate) fn is_setting(key: &str) -> bool {
+    named(key).is_some()
 }
 
 /// What a setting reads as when it is named by key: what `:toggle <key>` does, in the
