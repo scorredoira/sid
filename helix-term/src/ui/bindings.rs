@@ -240,7 +240,9 @@ impl Clash {
     }
 }
 
-/// Whether the first key is one that types: giving it away would take a letter from the text.
+/// Whether the first key is one that types: giving it away would take a letter from the
+/// text. Enter, Tab, Backspace and Delete are text as much as a letter is: a line break,
+/// an indent, and the two ways of taking a character out.
 fn types(place: Where, keys: &[KeyEvent]) -> bool {
     if !place.modes().contains(&Mode::Insert) {
         return false;
@@ -249,7 +251,13 @@ fn types(place: Where, keys: &[KeyEvent]) -> bool {
         return false;
     };
     let held = KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER;
-    matches!(first.code, KeyCode::Char(_)) && !first.modifiers.intersects(held)
+    match first.code {
+        KeyCode::Char(_) => !first.modifiers.intersects(held),
+        KeyCode::Enter | KeyCode::Tab | KeyCode::Backspace | KeyCode::Delete => {
+            first.modifiers.is_empty()
+        }
+        _ => false,
+    }
 }
 
 /// How many shortcuts hang under a node.
@@ -727,6 +735,31 @@ mod tests {
         erase(&path, both, &keys("F7"), false).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(!written.contains("F7"), "{written}");
+    }
+
+    #[test]
+    fn enter_tab_backspace_and_delete_type_too() {
+        let maps = maps("");
+        for key in ["ret", "tab", "backspace", "del"] {
+            assert_eq!(
+                clash(&maps, Where::Anywhere, &keys(key), true),
+                Some(Clash::Text),
+                "{key}"
+            );
+        }
+        // Held with something they are shortcuts; out of insert they are keys like any.
+        assert!(clash(&maps, Where::Anywhere, &keys("S-del"), true).is_none());
+        assert!(clash(&maps, Where::Anywhere, &keys("C-ret"), true).is_none());
+        assert!(clash(
+            &maps,
+            Where::Modal {
+                normal: true,
+                select: true
+            },
+            &keys("ret"),
+            true
+        )
+        .is_none());
     }
 
     #[test]
