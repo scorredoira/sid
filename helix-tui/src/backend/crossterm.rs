@@ -15,8 +15,8 @@ use crossterm::{
     Command,
 };
 use helix_view::graphics::{Color, CursorKind, Modifier, Rect, UnderlineStyle};
-use std::borrow::Cow;
 use once_cell::sync::OnceCell;
+use std::borrow::Cow;
 use std::{
     fmt,
     io::{self, Write},

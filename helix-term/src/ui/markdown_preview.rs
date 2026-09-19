@@ -224,7 +224,8 @@ impl MarkdownPreview {
 
     /// Whether anything in the panel is selected, and so is what Copy copies.
     pub fn has_selection(&self) -> bool {
-        self.selection.is_some_and(|selection| !selection.is_empty())
+        self.selection
+            .is_some_and(|selection| !selection.is_empty())
     }
 
     /// Nothing is selected any more. Answers whether anything was: the screen only needs
@@ -299,9 +300,10 @@ impl MarkdownPreview {
         let (view, doc) = current_ref!(editor);
         let offset = self.offset(doc.id(), top_line(doc, view.id));
         let on_row = row.clamp(self.content.y, self.content.bottom() - 1);
-        let index =
-            (offset + (on_row - self.content.y) as usize).min(rendered.rows.len() - 1);
-        let column = column.saturating_sub(self.content.x).min(self.content.width) as usize;
+        let index = (offset + (on_row - self.content.y) as usize).min(rendered.rows.len() - 1);
+        let column = column
+            .saturating_sub(self.content.x)
+            .min(self.content.width) as usize;
 
         Some((index, column))
     }

@@ -1976,7 +1976,11 @@ impl EditorView {
                             // While typing the caret is a bar between two characters: the
                             // selection runs from the boundary it was on to the one clicked,
                             // and never takes the character past it as well.
-                            let anchor = if first { range.cursor(text) } else { range.anchor };
+                            let anchor = if first {
+                                range.cursor(text)
+                            } else {
+                                range.anchor
+                            };
                             Range::new(anchor, pos)
                         } else {
                             range.put_cursor(text, pos, true)
