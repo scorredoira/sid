@@ -196,7 +196,7 @@ impl ChangesTab {
     }
 
     /// Does `act` to `file` off the main thread; the list is asked again when it lands, and
-    /// a discarded file that is open is read again from disk.
+    /// a discarded file that is open is reloaded or closed if it was deleted.
     pub fn act(&mut self, act: Act, file: ChangedFile) {
         let root = self.root.clone();
         super::background(
@@ -212,7 +212,11 @@ impl ChangesTab {
                 if let Err(err) = answer {
                     editor.set_error(format!("{}: {err}", act.label()));
                 } else if act == Act::Discard {
-                    reload_document(editor, &file.path);
+                    if file.is_untracked() {
+                        super::files::close_documents_under(editor, &file.path);
+                    } else {
+                        reload_document(editor, &file.path);
+                    }
                 }
                 sidebar.changes.ask();
             },

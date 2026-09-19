@@ -7,6 +7,7 @@ mod movement;
 mod reverse_selection_contents;
 mod rotate_selection_contents;
 mod shortcuts;
+mod sidebar;
 mod write;
 
 #[tokio::test(flavor = "multi_thread")]

@@ -794,7 +794,7 @@ fn retarget_documents(editor: &mut Editor, source: &Path, target: &Path) {
 /// changes: a buffer left open for a file that no longer exists writes it back the next
 /// time anything saves, and the file the user just deleted comes back. The confirmation
 /// says so before the deletion happens.
-fn close_documents_under(editor: &mut Editor, target: &Path) {
+pub(super) fn close_documents_under(editor: &mut Editor, target: &Path) {
     let gone: Vec<helix_view::DocumentId> = editor
         .documents()
         .filter(|doc| doc.path().is_some_and(|path| path.starts_with(target)))
