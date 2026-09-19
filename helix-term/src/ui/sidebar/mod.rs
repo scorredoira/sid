@@ -746,50 +746,30 @@ impl Sidebar {
         outcome == Outcome::Leave
     }
 
+    /// Folds or unfolds the row under the cursor: a directory, a definition with others
+    /// inside it.
     fn toggle_dir(&mut self, editor: &mut Editor) {
-        let tab = self.active();
-        let Some(dir) = tab.rows().get(tab.list().cursor).and_then(Row::dir) else {
-            return;
-        };
-        let dir = dir.to_path_buf();
-        let open = tab.folds().is_some_and(|folds| folds.is_open(&dir));
-        self.set_dir_open(editor, dir, !open);
+        let cursor = self.active().list().cursor;
+        if let Some(open) = self.active().fold_state(cursor) {
+            self.active_mut().set_fold(editor, cursor, !open);
+        }
     }
 
     fn expand_dir(&mut self, editor: &mut Editor) {
-        let tab = self.active();
-        let Some(dir) = tab.rows().get(tab.list().cursor).and_then(Row::dir) else {
-            return;
-        };
-        let dir = dir.to_path_buf();
-        if tab.folds().is_some_and(|folds| folds.is_open(&dir)) {
-            return;
+        let cursor = self.active().list().cursor;
+        if self.active().fold_state(cursor) == Some(false) {
+            self.active_mut().set_fold(editor, cursor, true);
         }
-        self.set_dir_open(editor, dir, true);
     }
 
-    fn set_dir_open(&mut self, editor: &mut Editor, dir: PathBuf, open: bool) {
-        let tab = self.active_mut();
-        let Some(folds) = tab.folds_mut() else {
-            return;
-        };
-        folds.set(dir, open);
-        tab.rebuild(editor);
+    /// Shift-Left and Shift-Right: every row of the list that folds is closed, or opened.
+    fn fold_all(&mut self, editor: &mut Editor, open: bool) {
+        self.active_mut().fold_all(editor, open);
     }
 
-    fn collapse_all(&mut self, editor: &mut Editor) {
-        let tab = self.active_mut();
-        let dirs: Vec<PathBuf> = tab
-            .rows()
-            .iter()
-            .filter_map(Row::dir)
-            .map(Path::to_path_buf)
-            .collect();
-        let Some(folds) = tab.folds_mut() else {
-            return;
-        };
-        folds.close_all(dirs.into_iter());
-        tab.rebuild(editor);
+    /// Folds every definition of the outline, or unfolds them, wherever the focus is.
+    pub fn fold_outline(&mut self, editor: &mut Editor, open: bool) {
+        self.outline.fold_all(editor, open);
     }
 
     /// Folds every directory of the file tree, whichever tab is on screen and wherever the
@@ -812,19 +792,17 @@ impl Sidebar {
     }
 
     /// Closes the directory under the cursor; on a file or a closed directory, jumps to
-    /// the parent instead, so repeated presses walk up the tree.
+    /// the parent instead, so repeated presses walk up the tree. The outline folds the
+    /// same way, a definition with others inside it being its directory.
     fn collapse_or_parent(&mut self, editor: &mut Editor) {
         let tab = self.active();
         let cursor = tab.list().cursor;
         let Some(row) = tab.rows().get(cursor) else {
             return;
         };
-        if let Some(dir) = row.dir() {
-            if tab.folds().is_some_and(|folds| folds.is_open(dir)) {
-                let dir = dir.to_path_buf();
-                self.set_dir_open(editor, dir, false);
-                return;
-            }
+        if tab.fold_state(cursor) == Some(true) {
+            self.active_mut().set_fold(editor, cursor, false);
+            return;
         }
         let depth = row.depth();
         if depth == 0 {
@@ -940,13 +918,13 @@ impl Sidebar {
                     self.focused = false;
                 }
             }
+            (KeyCode::Right, KeyModifiers::SHIFT) => {
+                self.fold_all(editor, true);
+            }
             (KeyCode::Right, _) => {
                 let tab = self.active();
-                let on_dir = tab
-                    .rows()
-                    .get(tab.list().cursor)
-                    .is_some_and(|row| row.dir().is_some());
-                if on_dir {
+                let folds = tab.fold_state(tab.list().cursor).is_some();
+                if folds {
                     self.expand_dir(editor);
                 } else if self.open_row(editor, Activation::Enter) {
                     self.code_hidden = false;
@@ -954,7 +932,7 @@ impl Sidebar {
                 }
             }
             (KeyCode::Left, KeyModifiers::SHIFT) => {
-                self.collapse_all(editor);
+                self.fold_all(editor, false);
             }
             (KeyCode::Left, _) => {
                 self.collapse_or_parent(editor);
@@ -1815,6 +1793,24 @@ fn open_outline_menu(
                 Box::new(|compositor, cx| {
                     if let Some(view) = compositor.find::<editor::EditorView>() {
                         view.sidebar.toggle_outline_beside(cx.editor);
+                    }
+                }),
+            ),
+            context_menu::Entry::new(
+                "Fold every definition",
+                "Shift-Left",
+                Box::new(|compositor, cx| {
+                    if let Some(view) = compositor.find::<editor::EditorView>() {
+                        view.sidebar.fold_outline(cx.editor, false);
+                    }
+                }),
+            ),
+            context_menu::Entry::new(
+                "Unfold every definition",
+                "Shift-Right",
+                Box::new(|compositor, cx| {
+                    if let Some(view) = compositor.find::<editor::EditorView>() {
+                        view.sidebar.fold_outline(cx.editor, true);
                     }
                 }),
             ),

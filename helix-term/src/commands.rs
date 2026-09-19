@@ -429,6 +429,8 @@ impl MappableCommand {
         toggle_hidden_files, "Show or hide hidden files in the file tree",
         outline_toggle, "Go to the outline of the current file's functions and types, under the file tree, or put it away when the keys are already there",
         outline_sort_toggle, "List the outline by name, or in the order the file defines things",
+        outline_fold, "Fold every definition of the outline",
+        outline_unfold, "Unfold every definition of the outline",
         review_cycle, "Walk the files, the changes, the commits and the code",
         review_cycle_back, "Walk the code, the commits, the changes and the files, the other way round",
         review_commits_toggle, "Show or hide the git commits panel",
@@ -4915,6 +4917,20 @@ fn outline_sort_toggle(_cx: &mut Context) {
     job::dispatch_blocking(|editor, compositor| {
         let editor_view = compositor.find::<ui::EditorView>().unwrap();
         editor_view.sidebar.toggle_outline_sort(editor);
+    });
+}
+
+fn outline_fold(_cx: &mut Context) {
+    job::dispatch_blocking(|editor, compositor| {
+        let editor_view = compositor.find::<ui::EditorView>().unwrap();
+        editor_view.sidebar.fold_outline(editor, false);
+    });
+}
+
+fn outline_unfold(_cx: &mut Context) {
+    job::dispatch_blocking(|editor, compositor| {
+        let editor_view = compositor.find::<ui::EditorView>().unwrap();
+        editor_view.sidebar.fold_outline(editor, true);
     });
 }
 

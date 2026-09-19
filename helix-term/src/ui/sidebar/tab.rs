@@ -2,7 +2,7 @@
 //! directories, draws the rows and routes the keys; a tab says what its rows are, where
 //! they come from, and what opening one means.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use helix_view::Editor;
 
@@ -63,6 +63,49 @@ pub trait TabView {
 
     fn empty_message(&self) -> Option<Message> {
         None
+    }
+
+    /// Whether the row at `index` folds — a directory, a definition with others inside
+    /// it — and whether it is open; none for a row that cannot fold.
+    fn fold_state(&self, index: usize) -> Option<bool> {
+        let dir = self.rows().get(index)?.dir()?;
+        Some(self.folds()?.is_open(dir))
+    }
+
+    /// Opens or closes the row at `index`, when it folds.
+    fn set_fold(&mut self, editor: &mut Editor, index: usize, open: bool) {
+        let dir = self
+            .rows()
+            .get(index)
+            .and_then(Row::dir)
+            .map(Path::to_path_buf);
+        let Some(dir) = dir else {
+            return;
+        };
+        let Some(folds) = self.folds_mut() else {
+            return;
+        };
+        folds.set(dir, open);
+        self.rebuild(editor);
+    }
+
+    /// Closes every row that folds, or opens them all. A tree that reads the disk as
+    /// directories are opened only closes: opening every directory would read it whole.
+    fn fold_all(&mut self, editor: &mut Editor, open: bool) {
+        if open {
+            return;
+        }
+        let dirs: Vec<PathBuf> = self
+            .rows()
+            .iter()
+            .filter_map(Row::dir)
+            .map(Path::to_path_buf)
+            .collect();
+        let Some(folds) = self.folds_mut() else {
+            return;
+        };
+        folds.close_all(dirs.into_iter());
+        self.rebuild(editor);
     }
 
     /// Lays the rows out again from what the tab holds; the cursor stays on its entry.

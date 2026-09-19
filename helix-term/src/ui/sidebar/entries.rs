@@ -31,6 +31,8 @@ pub struct SymbolRow {
     pub kind: &'static str,
     /// How many definitions it sits inside, when the outline follows the file's order.
     pub depth: usize,
+    /// Whether other definitions sit inside it, so it folds, and whether it is open.
+    pub fold: Option<bool>,
     /// Where the definition starts and ends, in characters of the document.
     pub start: usize,
     pub end: usize,

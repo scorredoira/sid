@@ -132,6 +132,38 @@ pub struct Outline {
     current: Option<usize>,
     /// What the rows are narrowed to while the filter box is open.
     filter: Option<String>,
+    /// Which definitions are folded, hiding the ones inside them.
+    folds: SymbolFolds,
+}
+
+/// Which definitions of the outline are folded. Every one opens by default and the ones
+/// folded are remembered; after folding them all it is the other way round.
+#[derive(Default)]
+struct SymbolFolds {
+    all_folded: bool,
+    /// The definitions, by name and kind, folded — or unfolded, once all were folded.
+    toggled: HashSet<(String, &'static str)>,
+}
+
+impl SymbolFolds {
+    fn is_open(&self, symbol: &Symbol) -> bool {
+        let toggled = self.toggled.contains(&(symbol.name.clone(), symbol.kind));
+        self.all_folded == toggled
+    }
+
+    fn set(&mut self, symbol: &Symbol, open: bool) {
+        let key = (symbol.name.clone(), symbol.kind);
+        if open != self.all_folded {
+            self.toggled.remove(&key);
+        } else {
+            self.toggled.insert(key);
+        }
+    }
+
+    fn set_all(&mut self, open: bool) {
+        self.all_folded = !open;
+        self.toggled.clear();
+    }
 }
 
 impl Outline {
@@ -165,7 +197,18 @@ impl Outline {
             focused: false,
             current: None,
             filter: None,
+            folds: SymbolFolds::default(),
         }
+    }
+
+    /// The definition a row lists, as the outline holds it.
+    fn symbol_at(&self, index: usize) -> Option<&Symbol> {
+        let Row::Symbol(row) = self.rows.get(index)? else {
+            return None;
+        };
+        self.symbols
+            .iter()
+            .find(|symbol| symbol.start == row.start && symbol.name == row.name)
     }
 
     pub fn filter(&self) -> Option<&str> {
@@ -500,20 +543,31 @@ fn is_callable(kind: &str) -> bool {
 }
 
 /// Lays `symbols`, in the file's order, out as rows: each one indented by how many
-/// definitions it sits inside.
-fn nested_rows(symbols: &[&Symbol]) -> Vec<Row> {
-    let mut open: Vec<usize> = Vec::new();
-    symbols
-        .iter()
-        .map(|symbol| {
-            while open.last().is_some_and(|end| *end <= symbol.start) {
-                open.pop();
-            }
-            let depth = open.len();
-            open.push(symbol.end);
-            Row::Symbol(symbol_row(symbol, depth))
-        })
-        .collect()
+/// definitions it sits inside, and the ones inside a folded definition left out.
+fn nested_rows(symbols: &[&Symbol], folds: &SymbolFolds) -> Vec<Row> {
+    // The definitions the row being laid out sits inside: where each ends, and whether
+    // it is folded, which hides everything down to that end.
+    let mut open: Vec<(usize, bool)> = Vec::new();
+    let mut rows = Vec::new();
+    for (index, symbol) in symbols.iter().enumerate() {
+        while open.last().is_some_and(|(end, _)| *end <= symbol.start) {
+            open.pop();
+        }
+        let hidden = open.iter().any(|(_, folded)| *folded);
+        let depth = open.len();
+        let has_inside = symbols
+            .get(index + 1)
+            .is_some_and(|next| next.start < symbol.end);
+        let is_open = folds.is_open(symbol);
+        open.push((symbol.end, has_inside && !is_open));
+        if hidden {
+            continue;
+        }
+        let mut row = symbol_row(symbol, depth);
+        row.fold = has_inside.then_some(is_open);
+        rows.push(Row::Symbol(row));
+    }
+    rows
 }
 
 /// Lays `symbols` out by name, flat: a name reads the same wherever it was defined.
@@ -548,6 +602,7 @@ fn symbol_row(symbol: &Symbol, depth: usize) -> SymbolRow {
         name: symbol.name.clone(),
         kind: symbol.kind,
         depth,
+        fold: None,
         start: symbol.start,
         end: symbol.end,
         jump: symbol.jump,
@@ -590,6 +645,28 @@ impl TabView for Outline {
     /// Lays the rows out from the definitions held; the cursor stays on its definition
     /// when the order or the file changed under it.
     fn rebuild(&mut self, _editor: &mut Editor) {
+        self.rebuild_rows();
+    }
+
+    fn fold_state(&self, index: usize) -> Option<bool> {
+        match self.rows.get(index)? {
+            Row::Symbol(symbol) => symbol.fold,
+            _ => None,
+        }
+    }
+
+    fn set_fold(&mut self, _editor: &mut Editor, index: usize, open: bool) {
+        let Some(symbol) = self.symbol_at(index).cloned() else {
+            return;
+        };
+        self.folds.set(&symbol, open);
+        self.rebuild_rows();
+    }
+
+    /// Folds every definition, or unfolds them; the cursor goes to the definition it was
+    /// inside when that is folded away.
+    fn fold_all(&mut self, _editor: &mut Editor, open: bool) {
+        self.folds.set_all(open);
         self.rebuild_rows();
     }
 
@@ -646,7 +723,7 @@ impl Outline {
         self.rows = if self.layout.by_name {
             named_rows(&listed)
         } else {
-            nested_rows(&listed)
+            nested_rows(&listed, &self.folds)
         };
         self.list.set_len(self.rows.len());
         let found =
@@ -676,6 +753,11 @@ pub fn draw_symbol(surface: &mut Surface, paint: &RowPaint, row: &SymbolRow, the
     let indent = 3 + row.depth * 2;
     let x = paint.line.x + indent as u16;
     let y = paint.line.y;
+    // A definition with others inside it folds, and wears the tree's own marker.
+    if let Some(open) = row.fold {
+        let marker = if open { "▾" } else { "▸" };
+        surface.set_string(x - 2, y, marker, style);
+    }
     let width = (paint.line.width as usize).saturating_sub(indent + 1);
     let kind_room = row.kind.len() + 1;
     let name_width = if width > kind_room + 8 {
@@ -736,7 +818,7 @@ mod tests {
             symbol("main", "function", 120, 150),
         ];
         assert_eq!(
-            names(&nested_rows(&listed(&symbols))),
+            names(&nested_rows(&listed(&symbols), &SymbolFolds::default())),
             vec![
                 ("Shape".to_string(), 0),
                 ("area".to_string(), 1),
@@ -755,7 +837,7 @@ mod tests {
             symbol("Colour", "class", 200, 300),
             symbol("new", "method", 210, 240),
         ];
-        let rows = nested_rows(&listed(&symbols));
+        let rows = nested_rows(&listed(&symbols), &SymbolFolds::default());
         // The second `new` moved down by an edit above it: still the second.
         assert_eq!(reselect(&rows, "new", "method", 190), Some(3));
         assert_eq!(reselect(&rows, "new", "method", 12), Some(1));
@@ -793,6 +875,53 @@ mod tests {
     }
 
     #[test]
+    fn a_folded_definition_hides_what_sits_inside_it() {
+        let symbols = vec![
+            symbol("Shape", "class", 0, 100),
+            symbol("area", "method", 10, 40),
+            symbol("helper", "function", 20, 30),
+            symbol("main", "function", 120, 150),
+        ];
+        let mut folds = SymbolFolds::default();
+        let rows = nested_rows(&listed(&symbols), &folds);
+        assert_eq!(rows.len(), 4);
+        let fold = |rows: &[Row], index: usize| match &rows[index] {
+            Row::Symbol(symbol) => symbol.fold,
+            _ => unreachable!(),
+        };
+        // Only a definition with others inside it folds.
+        assert_eq!(fold(&rows, 0), Some(true));
+        assert_eq!(fold(&rows, 1), Some(true));
+        assert_eq!(fold(&rows, 2), None);
+        assert_eq!(fold(&rows, 3), None);
+
+        folds.set(&symbols[1], false);
+        let rows = nested_rows(&listed(&symbols), &folds);
+        assert_eq!(
+            names(&rows),
+            vec![
+                ("Shape".to_string(), 0),
+                ("area".to_string(), 1),
+                ("main".to_string(), 0),
+            ]
+        );
+        assert_eq!(fold(&rows, 1), Some(false));
+
+        // Folded all: only the top level stays, and one may be opened again.
+        folds.set_all(false);
+        let rows = nested_rows(&listed(&symbols), &folds);
+        assert_eq!(
+            names(&rows),
+            vec![("Shape".to_string(), 0), ("main".to_string(), 0)]
+        );
+        folds.set(&symbols[0], true);
+        let rows = nested_rows(&listed(&symbols), &folds);
+        assert_eq!(rows.len(), 3);
+        folds.set_all(true);
+        assert_eq!(nested_rows(&listed(&symbols), &folds).len(), 4);
+    }
+
+    #[test]
     fn by_name_is_flat_and_ignores_case() {
         let symbols = vec![
             symbol("zeta", "function", 0, 10),
@@ -820,7 +949,10 @@ mod tests {
             symbol("main", "function", 120, 150),
         ];
         assert_eq!(
-            names(&nested_rows(&only_callable(&symbols))),
+            names(&nested_rows(
+                &only_callable(&symbols),
+                &SymbolFolds::default()
+            )),
             vec![
                 ("area".to_string(), 0),
                 ("helper".to_string(), 1),
