@@ -4761,8 +4761,14 @@ fn name_each_then(cx: &mut compositor::Context, mut left: Vec<DocumentId>, done:
 /// The settings a newcomer reaches for, on screen instead of in a file nobody knows is
 /// there. What is changed here is written to config.toml as it is changed.
 fn settings(_cx: &mut Context) {
-    job::dispatch_blocking(|_editor, compositor| {
-        compositor.push(Box::new(ui::settings::Settings::new()));
+    job::dispatch_blocking(|editor, compositor| {
+        // Each setting wears the keys that flip it, read by what they run: a setting is
+        // a command, and this is where its shortcut is seen without leaving the screen.
+        let shortcuts = ui::bindings::by_action(
+            &compositor.find::<ui::EditorView>().unwrap().keymaps.map()[&editor.mode],
+            editor.keyboard_enhanced,
+        );
+        compositor.push(Box::new(ui::settings::Settings::new(shortcuts)));
     });
 }
 

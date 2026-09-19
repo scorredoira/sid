@@ -143,12 +143,18 @@ const SETTINGS: &[Setting] = &[
     },
 ];
 
-/// The settings a newcomer reaches for, each with what it is set to now. Up and down
-/// walk them, Space or Enter changes the one in focus, a click changes the one it lands
-/// on, and every change is written to `config.toml` as it is made.
+/// The settings a newcomer reaches for, each with what it is set to now and the keys
+/// that flip it. Up and down walk them, typing narrows them, Space or Enter changes the
+/// one in focus, a click changes the one it lands on, and every change is written to
+/// `config.toml` as it is made.
 pub struct Settings {
+    /// Which of the shown settings is in focus.
     cursor: usize,
-    /// Where each line was drawn last, so a click can land on one.
+    /// What has been typed to narrow the list.
+    query: String,
+    /// The keys that flip each setting, by the command that does it.
+    shortcuts: super::bindings::ByAction,
+    /// Where each shown line was drawn last, so a click can land on one.
     rows: Vec<Rect>,
 }
 
@@ -159,30 +165,78 @@ const GAP: u16 = 4;
 
 impl Default for Settings {
     fn default() -> Self {
-        Self::new()
+        Self::new(super::bindings::ByAction::new())
     }
 }
 
 impl Settings {
-    pub fn new() -> Self {
+    /// The screen, told which keys run what so each setting can wear its own.
+    pub fn new(shortcuts: super::bindings::ByAction) -> Self {
         Self {
             cursor: 0,
+            query: String::new(),
+            shortcuts,
             rows: Vec::new(),
         }
     }
 
+    /// The settings the filter leaves, as indices into all of them.
+    fn shown(&self) -> Vec<usize> {
+        let words: Vec<String> = self
+            .query
+            .to_lowercase()
+            .split_whitespace()
+            .map(ToString::to_string)
+            .collect();
+        (0..SETTINGS.len())
+            .filter(|index| {
+                let setting = &SETTINGS[*index];
+                let text =
+                    format!("{} {} {}", setting.label, setting.also, setting.key).to_lowercase();
+                words.iter().all(|word| text.contains(word))
+            })
+            .collect()
+    }
+
+    /// The keys that flip a setting, as the keyboard shortcuts screen writes them.
+    fn keys_of(&self, setting: &Setting) -> String {
+        let runs = super::bindings::Runs::One(format!(":toggle-option {}", given(setting)));
+        self.shortcuts
+            .get(&runs)
+            .map(|shortcuts| {
+                shortcuts
+                    .iter()
+                    .map(|keys| {
+                        keys.iter()
+                            .map(|key| super::shortcuts::key_label(*key))
+                            .collect::<Vec<_>>()
+                            .join(" → ")
+                    })
+                    .collect::<Vec<_>>()
+                    .join("   ")
+            })
+            .unwrap_or_default()
+    }
+
     fn walk(&mut self, down: bool) {
-        let last = SETTINGS.len() - 1;
+        let count = self.shown().len();
+        if count == 0 {
+            self.cursor = 0;
+            return;
+        }
         self.cursor = if down {
-            (self.cursor + 1) % SETTINGS.len()
+            (self.cursor + 1) % count
         } else {
-            self.cursor.checked_sub(1).unwrap_or(last)
+            self.cursor.checked_sub(1).unwrap_or(count - 1)
         };
     }
 
     /// Changes the setting in focus: a switch flips, a word gives way to the next one.
     fn change(&mut self, cx: &mut Context) {
-        let setting = &SETTINGS[self.cursor];
+        let Some(&index) = self.shown().get(self.cursor) else {
+            return;
+        };
+        let setting = &SETTINGS[index];
         let current = read(&snapshot(cx.editor), setting.key);
         let next = match (&setting.kind, &current) {
             (Kind::Switch, Value::Bool(on)) => Value::Bool(!on),
@@ -419,17 +473,27 @@ impl Component for Settings {
             .map(|setting| setting.label.chars().count())
             .max()
             .unwrap_or(0) as u16;
+        let keys: Vec<String> = SETTINGS
+            .iter()
+            .map(|setting| self.keys_of(setting))
+            .collect();
+        let keys_width = keys
+            .iter()
+            .map(|keys| keys.chars().count())
+            .max()
+            .unwrap_or(0) as u16;
         let values = SETTINGS
             .iter()
             .map(|setting| shown(setting, &read(&config, setting.key)).chars().count())
             .max()
             .unwrap_or(0) as u16;
 
-        let hint = "Space changes it  ·  Esc closes";
-        let inside = (labels + GAP + values).max(hint.chars().count() as u16);
+        let hint = "Space changes it  ·  Type to filter  ·  Esc closes";
+        let inside = (labels + GAP + keys_width + GAP + values).max(hint.chars().count() as u16);
         let width = (inside + PADDING * 2 + 2).min(area.width);
-        // The title, a blank row, the settings, a blank row and the hint, plus borders.
-        let height = (SETTINGS.len() as u16 + 6).min(area.height);
+        // The title, the filter, a blank row, the settings, a blank row and the hint, plus
+        // borders.
+        let height = (SETTINGS.len() as u16 + 7).min(area.height);
         let screen = Rect::new(
             area.x + area.width.saturating_sub(width) / 2,
             area.y + area.height.saturating_sub(height) / 2,
@@ -451,15 +515,20 @@ impl Component for Settings {
 
         let bold = text.add_modifier(Modifier::BOLD);
         surface.set_stringn(inner.x, inner.y, "Settings", inner.width as usize, bold);
+        let filter = format!("Filter: {}▏", self.query);
+        surface.set_stringn(inner.x, inner.y + 1, &filter, inner.width as usize, text);
 
+        let shown_settings = self.shown();
+        self.cursor = self.cursor.min(shown_settings.len().saturating_sub(1));
         self.rows.clear();
-        for (index, setting) in SETTINGS.iter().enumerate() {
-            let y = inner.y + 2 + index as u16;
+        for (at, index) in shown_settings.iter().enumerate() {
+            let setting = &SETTINGS[*index];
+            let y = inner.y + 3 + at as u16;
             if y >= inner.bottom() {
                 break;
             }
 
-            let focused = index == self.cursor;
+            let focused = at == self.cursor;
             let row = Rect::new(inner.x, y, inner.width, 1);
             if focused {
                 surface.set_style(row, selected);
@@ -469,9 +538,18 @@ impl Component for Settings {
             surface.set_stringn(inner.x, y, setting.label, inner.width as usize, label_style);
 
             let value = shown(setting, &read(&config, setting.key));
-            let at = inner.right().saturating_sub(value.chars().count() as u16);
+            let value_x = inner.right().saturating_sub(value.chars().count() as u16);
             let style = if focused { selected } else { value_style };
-            surface.set_stringn(at, y, &value, inner.width as usize, style);
+            surface.set_stringn(value_x, y, &value, inner.width as usize, style);
+
+            // The keys that flip it, between the label and the value: a setting is a
+            // command, and this is where its shortcut is seen without leaving the screen.
+            let keys = &keys[*index];
+            if !keys.is_empty() {
+                let keys_x = inner.x + labels + GAP;
+                let room = value_x.saturating_sub(keys_x + 1) as usize;
+                surface.set_stringn(keys_x, y, keys, room, if focused { selected } else { dim });
+            }
 
             self.rows.push(row);
         }
@@ -512,15 +590,30 @@ impl Settings {
                     compositor.pop();
                 })))
             }
-            KeyCode::Down | KeyCode::Tab | KeyCode::Char('j') => self.walk(true),
-            KeyCode::Up | KeyCode::Char('k') => self.walk(false),
+            KeyCode::Down | KeyCode::Tab => self.walk(true),
+            KeyCode::Up => self.walk(false),
             KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Left | KeyCode::Right => self.change(cx),
+            KeyCode::Backspace => {
+                self.query.pop();
+                self.cursor = 0;
+            }
+            // Typing narrows the list: the words of a setting, or the key config.toml
+            // knows it by.
+            KeyCode::Char(c) if !key.modifiers.intersects(HELD) => {
+                self.query.push(c);
+                self.cursor = 0;
+            }
             _ => {}
         }
 
         EventResult::Consumed(None)
     }
 }
+
+/// The modifiers that make a letter a shortcut rather than something typed.
+const HELD: helix_view::keyboard::KeyModifiers = helix_view::keyboard::KeyModifiers::CONTROL
+    .union(helix_view::keyboard::KeyModifiers::ALT)
+    .union(helix_view::keyboard::KeyModifiers::SUPER);
 
 #[cfg(test)]
 mod tests {
@@ -617,6 +710,38 @@ mod tests {
         let written = std::fs::read_to_string(&real).unwrap();
         assert!(written.contains("theme = \"github_dark\""));
         assert!(written.contains("mouse = false"), "{written}");
+    }
+
+    #[test]
+    fn typing_narrows_the_settings_by_every_word_for_them() {
+        let mut settings = Settings::default();
+        assert_eq!(settings.shown().len(), SETTINGS.len());
+        settings.query = "wrap".into();
+        let shown = settings.shown();
+        assert_eq!(shown.len(), 1);
+        assert_eq!(SETTINGS[shown[0]].key, "soft-wrap.enable");
+        // By the other words it answers to, and by its key in config.toml.
+        settings.query = "wordwrap".into();
+        assert_eq!(settings.shown().len(), 1);
+        settings.query = "cursor-blink".into();
+        assert_eq!(settings.shown().len(), 1);
+    }
+
+    #[test]
+    fn a_setting_wears_the_keys_that_flip_it() {
+        let trie: crate::keymap::KeyTrie =
+            toml::from_str(r#"A-z = ":toggle soft-wrap.enable""#).unwrap();
+        let settings = Settings::new(super::super::bindings::by_action(&trie, true));
+        let wrapping = SETTINGS
+            .iter()
+            .find(|setting| setting.key == "soft-wrap.enable")
+            .unwrap();
+        assert_eq!(settings.keys_of(wrapping), "Alt+z");
+        let mouse = SETTINGS
+            .iter()
+            .find(|setting| setting.key == "mouse")
+            .unwrap();
+        assert_eq!(settings.keys_of(mouse), "");
     }
 
     #[test]
