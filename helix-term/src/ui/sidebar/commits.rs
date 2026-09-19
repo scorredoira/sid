@@ -271,12 +271,12 @@ impl CommitsTab {
         self.ask_page(0);
     }
 
-    /// Opens `commit` into its files, shown under the history with the keys in them, as
-    /// Enter on the commit would: for a commit reached from elsewhere, a blamed line.
-    pub fn open_commit_with_files(&mut self, commit: Commit) {
-        self.files_visible = true;
+    /// Opens `commit`, reached from elsewhere — a blamed line — as a click on it would:
+    /// its diff on screen, and the files under the history only if the pane is already
+    /// shown. The pane never comes on its own; Enter or F9 bring it.
+    pub fn open_commit_reached(&mut self, commit: Commit) {
         self.follow = true;
-        self.open_commit(commit, true);
+        self.open_commit(commit, false);
     }
 
     /// Opens `commit` into its files, the cursor on the file the commit was reached by when

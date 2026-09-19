@@ -664,13 +664,13 @@ impl Sidebar {
         Some((self.root.clone(), request))
     }
 
-    /// Opens `commit` into its files in the Commits tab, focused.
+    /// Opens `commit` in the Commits tab, focused, its diff on screen.
     pub fn open_commit(&mut self, commit: Commit) {
         self.open = true;
         self.focused = true;
         self.tab = TabKind::Commits;
         self.revealed = None;
-        self.commits.open_commit_with_files(commit);
+        self.commits.open_commit_reached(commit);
         self.settle_code();
     }
 
