@@ -463,7 +463,7 @@ impl MappableCommand {
         insert_at_line_end, "Insert at end of line",
         open_below, "Open new line below selection",
         open_above, "Open new line above selection",
-        normal_mode, "Enter normal mode",
+        normal_mode, "Edit modally: the keys stop typing and act on the text",
         select_mode, "Enter selection extend mode",
         exit_select_mode, "Exit selection mode",
         goto_definition, "Goto definition",
@@ -708,7 +708,12 @@ impl std::str::FromStr for MappableCommand {
                     let doc = if args.is_empty() {
                         cmd.doc.to_string()
                     } else {
-                        format!(":{} {:?}", cmd.name, args)
+                        // A shortcut that flips a setting says which setting, in the words
+                        // the settings screen uses: ":toggle-option \"soft-wrap.enable\"" is
+                        // not what anybody looks for when they look for wrapping.
+                        crate::ui::settings::told(args)
+                            .filter(|_| cmd.name == "toggle-option")
+                            .unwrap_or_else(|| format!(":{} {:?}", cmd.name, args))
                     };
                     MappableCommand::Typable {
                         name: cmd.name.to_owned(),
@@ -3779,6 +3784,24 @@ mod palette_test {
         pattern.score(haystack, &mut matcher).is_some()
     }
 
+    fn found_typable(query: &str, binding: &str) -> bool {
+        let command: MappableCommand = binding.parse().unwrap();
+        let text = palette_text(&command);
+        let mut buffer = Vec::new();
+        let haystack = nucleo::Utf32Str::new(&text, &mut buffer);
+        let mut matcher = nucleo::Matcher::new(nucleo::Config::DEFAULT);
+        let query = crate::ui::picker::whole_words(query);
+        let pattern = Pattern::parse(&query, CaseMatching::Smart, Normalization::Smart);
+        pattern.score(haystack, &mut matcher).is_some()
+    }
+
+    #[test]
+    fn a_shortcut_that_flips_a_setting_says_which_setting() {
+        // Alt-z is ":toggle soft-wrap.enable", which nobody looks for by that name.
+        assert!(found_typable("wrap", ":toggle soft-wrap.enable"));
+        assert!(found_typable("long lines", ":toggle soft-wrap.enable"));
+    }
+
     #[test]
     fn the_palette_finds_a_command_by_what_it_does() {
         // Neither name says diff or git: the description does.
@@ -3794,6 +3817,8 @@ mod palette_test {
         assert!(!found("search", "select_regex"));
         assert!(!found("search", "settings"));
         assert!(found("sel reg", "select_regex"));
+        // The way into modal editing is found by the word for it.
+        assert!(found("modal", "normal_mode"));
     }
 }
 
@@ -5167,6 +5192,7 @@ pub fn command_palette(cx: &mut Context) {
 
             // What is typed looks in the name and the description at once: "diff" finds
             // every command about diffs, whatever it is called.
+            let enhanced = cx.editor.keyboard_enhanced;
             let picker = Picker::new(columns, 3, commands, keymap, move |cx, command, _action| {
                 let mut ctx = Context {
                     register,
@@ -5193,6 +5219,30 @@ pub fn command_palette(cx: &mut Context) {
                     }
                 }
             });
+            // The keys a command answers to are changed where every shortcut is, and this
+            // is the way there: the command under the cursor, already asking for them.
+            let picker = picker
+                .with_hint(&["Ctrl-k: change its shortcut"])
+                .with_aside(
+                    KeyEvent {
+                        code: KeyCode::Char('k'),
+                        modifiers: helix_view::keyboard::KeyModifiers::CONTROL,
+                    },
+                    move |command: &MappableCommand| {
+                        let runs = ui::bindings::Runs::of(command);
+                        Some(Box::new(
+                            move |compositor: &mut Compositor, _cx: &mut compositor::Context| {
+                                compositor.pop();
+                                let view = compositor.find::<ui::EditorView>().unwrap();
+                                let map = view.keymaps.map();
+                                let screen =
+                                    ui::shortcuts::Shortcuts::giving(&map, enhanced, &runs);
+                                drop(map);
+                                compositor.push(Box::new(screen));
+                            },
+                        ) as crate::compositor::Callback)
+                    },
+                );
             compositor.push(Box::new(overlaid(picker)));
         },
     ));

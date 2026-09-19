@@ -20,8 +20,9 @@ use crate::compositor::{Component, Context, Event, EventResult};
 /// What a setting can be: a switch, or one of a few words.
 enum Kind {
     Switch,
-    /// The words it cycles through, in order.
-    Words(&'static [&'static str]),
+    /// The words it cycles through, in order: what `config.toml` keeps, and what the
+    /// screen reads it as when the two are not the same word.
+    Words(&'static [(&'static str, &'static str)]),
 }
 
 /// One line of the screen: what it reads as, the configuration it stands for, and what
@@ -39,7 +40,9 @@ const SETTINGS: &[Setting] = &[
     Setting {
         label: "The mode it opens in",
         key: "default-mode",
-        kind: Kind::Words(&["insert", "normal"]),
+        // What config.toml calls "normal" is modal editing, and that is what it is
+        // called here: in sid the normal thing is to type.
+        kind: Kind::Words(&[("insert", "insert"), ("normal", "modal")]),
     },
     Setting {
         label: "Reopen the files a project had open",
@@ -64,12 +67,16 @@ const SETTINGS: &[Setting] = &[
     Setting {
         label: "Line numbers",
         key: "line-number",
-        kind: Kind::Words(&["absolute", "relative"]),
+        kind: Kind::Words(&[("absolute", "absolute"), ("relative", "relative")]),
     },
     Setting {
         label: "Tabs for the open files",
         key: "bufferline",
-        kind: Kind::Words(&["multiple", "always", "never"]),
+        kind: Kind::Words(&[
+            ("multiple", "multiple"),
+            ("always", "always"),
+            ("never", "never"),
+        ]),
     },
     Setting {
         label: "Indentation guides",
@@ -79,7 +86,11 @@ const SETTINGS: &[Setting] = &[
     Setting {
         label: "The cursor while typing",
         key: "cursor-shape.insert",
-        kind: Kind::Words(&["bar", "block", "underline"]),
+        kind: Kind::Words(&[
+            ("bar", "bar"),
+            ("block", "block"),
+            ("underline", "underline"),
+        ]),
     },
     Setting {
         label: "The cursor blinks",
@@ -157,9 +168,9 @@ impl Settings {
         let next = match (&setting.kind, &current) {
             (Kind::Switch, Value::Bool(on)) => Value::Bool(!on),
             (Kind::Words(words), Value::String(word)) => {
-                let at = words.iter().position(|option| option == word);
+                let at = words.iter().position(|(value, _)| value == word);
                 let next = at.map_or(0, |at| (at + 1) % words.len());
-                Value::String(words[next].to_string())
+                Value::String(words[next].0.to_string())
             }
             _ => {
                 cx.editor
@@ -189,6 +200,16 @@ impl Settings {
                 .set_error(format!("Changed, but not written down: {err:#}"));
         }
     }
+}
+
+/// What a setting reads as when it is named by key: what `:toggle <key>` does, in the
+/// words the settings screen uses, so a shortcut for it says something.
+pub(crate) fn told(key: &str) -> Option<String> {
+    let setting = SETTINGS.iter().find(|setting| setting.key == key)?;
+    Some(match setting.kind {
+        Kind::Switch => format!("{}, on or off", setting.label),
+        Kind::Words(_) => format!("{}, the next one", setting.label),
+    })
 }
 
 /// What a setting is set to right now.
@@ -282,7 +303,7 @@ fn as_toml(value: &Value) -> anyhow::Result<toml_edit::Value> {
 }
 
 /// Written aside and renamed over, so a crash never leaves half a configuration.
-fn write_atomically(path: &Path, text: String) -> anyhow::Result<()> {
+pub(crate) fn write_atomically(path: &Path, text: String) -> anyhow::Result<()> {
     let directory = path
         .parent()
         .context("the configuration file sits in a directory")?;
@@ -296,12 +317,19 @@ fn write_atomically(path: &Path, text: String) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// How a value reads on screen.
-fn shown(value: &Value) -> String {
+/// How a setting's value reads on screen, which is not always the word config.toml keeps.
+fn shown(setting: &Setting, value: &Value) -> String {
     match value {
         Value::Bool(true) => "on".to_string(),
         Value::Bool(false) => "off".to_string(),
-        Value::String(word) => word.clone(),
+        Value::String(word) => match &setting.kind {
+            Kind::Words(words) => words
+                .iter()
+                .find(|(value, _)| value == word)
+                .map(|(_, label)| label.to_string())
+                .unwrap_or_else(|| word.clone()),
+            Kind::Switch => word.clone(),
+        },
         other => other.to_string(),
     }
 }
@@ -315,7 +343,11 @@ impl Component for Settings {
             .unwrap_or(0) as u16;
         let values = SETTINGS
             .iter()
-            .map(|setting| shown(&read(cx.editor, setting.key)).chars().count())
+            .map(|setting| {
+                shown(setting, &read(cx.editor, setting.key))
+                    .chars()
+                    .count()
+            })
             .max()
             .unwrap_or(0) as u16;
 
@@ -362,7 +394,7 @@ impl Component for Settings {
             let label_style = if focused { selected } else { text };
             surface.set_stringn(inner.x, y, setting.label, inner.width as usize, label_style);
 
-            let value = shown(&read(cx.editor, setting.key));
+            let value = shown(setting, &read(cx.editor, setting.key));
             let at = inner.right().saturating_sub(value.chars().count() as u16);
             let style = if focused { selected } else { value_style };
             surface.set_stringn(at, y, &value, inner.width as usize, style);
@@ -419,6 +451,23 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_word_on_screen_is_not_always_the_word_config_toml_keeps() {
+        let setting = SETTINGS
+            .iter()
+            .find(|setting| setting.key == "default-mode")
+            .expect("the mode it opens in is a setting");
+        // What Helix calls normal mode is modal editing, and that is what it reads as.
+        assert_eq!(
+            shown(setting, &Value::String("normal".into())),
+            "modal".to_string()
+        );
+        assert_eq!(
+            shown(setting, &Value::String("insert".into())),
+            "insert".to_string()
+        );
+    }
 
     #[test]
     fn a_setting_is_written_where_it_belongs() {

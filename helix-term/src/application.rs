@@ -445,7 +445,8 @@ impl Application {
         let old_editor_config = self.editor.config();
 
         match config_event {
-            ConfigEvent::Refresh => self.refresh_config(),
+            ConfigEvent::Refresh => self.refresh_config(true),
+            ConfigEvent::RefreshQuietly => self.refresh_config(false),
 
             // Since only the Application can make changes to Editor's config,
             // the Editor must send up a new copy of a modified config so that
@@ -481,7 +482,7 @@ impl Application {
         }
     }
 
-    fn refresh_config(&mut self) {
+    fn refresh_config(&mut self, say: bool) {
         let mut refresh_config = || -> Result<(), Error> {
             let default_config = Config::load_default()
                 .map_err(|err| anyhow::anyhow!("Failed to load config: {}", err))?;
@@ -525,7 +526,9 @@ impl Application {
 
         match refresh_config() {
             Ok(_) => {
-                self.editor.set_status("Config refreshed");
+                if say {
+                    self.editor.set_status("Config refreshed");
+                }
             }
             Err(err) => {
                 self.editor.set_error(err.to_string());
@@ -622,7 +625,7 @@ impl Application {
                 self.render().await;
             }
             signal::SIGUSR1 => {
-                self.refresh_config();
+                self.refresh_config(true);
                 self.render().await;
             }
             signal::SIGTERM | signal::SIGINT => {

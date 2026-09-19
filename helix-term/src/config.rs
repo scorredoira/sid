@@ -160,8 +160,17 @@ impl Config {
 /// sid's defaults, which the user's config.toml is laid over.
 const DEFAULTS: &str = include_str!("defaults.toml");
 
+/// The keys sid ships with, before your `config.toml` is laid over them: what a shortcut
+/// goes back to when you give it back.
+pub fn default_keys() -> HashMap<Mode, KeyTrie> {
+    over_defaults("")
+        .and_then(|text| Config::load(Ok(&text), Err(ConfigLoadError::default())))
+        .map(|config| config.keys)
+        .unwrap_or_else(|_| keymap::default())
+}
+
 /// The user's config.toml laid over sid's defaults, as the text `Config::load` reads.
-fn over_defaults(user: &str) -> Result<String, ConfigLoadError> {
+pub(crate) fn over_defaults(user: &str) -> Result<String, ConfigLoadError> {
     let mut defaults: toml::Value = toml::from_str(DEFAULTS).expect("defaults.toml is valid TOML");
     spread_all_modes(&mut defaults);
     let mut user: toml::Value = toml::from_str(user).map_err(ConfigLoadError::BadConfig)?;

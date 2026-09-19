@@ -431,6 +431,8 @@ impl PanelInput {
 
 /// Hands a picker's query to a wider search, in place of the picker.
 type WidenFn = dyn Fn(&mut Compositor, &mut Context, String);
+/// What a picker's own key does with the row in focus.
+type AsideFn<T> = dyn Fn(&T) -> Option<crate::compositor::Callback>;
 
 pub struct Picker<T: 'static + Send + Sync, D: 'static> {
     columns: Arc<[Column<T, D>]>,
@@ -484,6 +486,9 @@ pub struct Picker<T: 'static + Send + Sync, D: 'static> {
     hint: &'static [&'static str],
     /// What Ctrl-f does with the query, for a picker that has somewhere wider to look.
     widen: Option<Box<WidenFn>>,
+    /// A key of the picker's own and what it does with the row in focus, without taking
+    /// Enter from it: the command palette gives a command a shortcut with it.
+    aside: Option<(KeyEvent, Box<AsideFn<T>>)>,
     title: Option<String>,
 
     /// Whether to show the preview panel (default true)
@@ -643,6 +648,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             panel_action: None,
             hint: &[],
             widen: None,
+            aside: None,
             title: None,
             truncate_start: true,
             show_preview: true,
@@ -747,6 +753,17 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             self.prompt.set_line(query, editor);
             self.handle_prompt_change(true);
         }
+        self
+    }
+
+    /// `key` does something of the picker's own with the row in focus, whatever the
+    /// query says, and Enter goes on doing what it did.
+    pub fn with_aside(
+        mut self,
+        key: KeyEvent,
+        aside: impl Fn(&T) -> Option<crate::compositor::Callback> + 'static,
+    ) -> Self {
+        self.aside = Some((key, Box::new(aside)));
         self
     }
 
@@ -1875,6 +1892,14 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
         if let Some(index) = self.panel_toggle_at(key_event) {
             self.flip_toggle(index);
             return EventResult::Consumed(None);
+        }
+
+        // The picker's own key, before the query hears about it.
+        if let Some((key, aside)) = self.aside.as_ref() {
+            if *key == key_event {
+                let callback = self.selection().and_then(|item| aside(item));
+                return EventResult::Consumed(callback);
+            }
         }
 
         // Tab walks the boxes and switches when the picker has any; without them it

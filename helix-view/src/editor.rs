@@ -1404,6 +1404,9 @@ pub enum EditorEvent {
 #[derive(Debug, Clone)]
 pub enum ConfigEvent {
     Refresh,
+    /// The same, for a change whoever made it has already said out loud: reading
+    /// config.toml again is how it takes effect, not news of its own.
+    RefreshQuietly,
     Update(Box<Config>),
     ThemeChanged,
 }

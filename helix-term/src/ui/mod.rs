@@ -1,4 +1,5 @@
 pub mod ask;
+pub mod bindings;
 pub mod busy;
 mod completion;
 pub mod confirm;
