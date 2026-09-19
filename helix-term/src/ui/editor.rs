@@ -304,7 +304,7 @@ impl EditorView {
             let text = doc.text();
             let first = text.char_to_line(view_offset.anchor.min(text.len_chars()));
             let end = (first + inner.height as usize + 1).min(text.len_lines());
-            overlays.extend(review.highlights(text, first..end, &loader));
+            overlays.extend(review.highlights(text, first..end, &loader, theme));
         }
 
         overlays.push(Self::overlay_syntax_highlights(

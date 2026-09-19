@@ -245,6 +245,11 @@ pub fn commit_files(root: &Path, hash: &str) -> Answer<(String, Vec<ChangedFile>
 }
 
 /// Full commit information, independent of the paths selected for its patch.
+/// How the two people of a commit are labelled over its message; the review buffer
+/// knows the lines by these, to set the names apart.
+pub const AUTHOR_LABEL: &str = "Autor: ";
+pub const COMMITTER_LABEL: &str = "Committer: ";
+
 pub fn commit_text(root: &Path, hash: &str) -> Answer<String> {
     let output = run(
         root,
@@ -262,39 +267,10 @@ pub fn commit_text(root: &Path, hash: &str) -> Answer<String> {
     let [author, committer, parents, message] = fields.as_slice() else {
         return Err("git show: incomplete commit information".into());
     };
-    let mut text = format!("Autor: {author}\nCommitter: {committer}\n");
-    for parent in parents.split_whitespace() {
-        let subject = run(root, &["show", "--no-patch", "--format=%s", parent, "--"])?;
-        text.push_str(&format!(
-            "Padre: {parent} ({})\n",
-            String::from_utf8_lossy(&subject).trim_end()
-        ));
-    }
-    let branches = run(
-        root,
-        &[
-            "for-each-ref",
-            "--format=%(refname:short)",
-            "--contains",
-            hash,
-            "refs/heads/",
-            "refs/remotes/",
-        ],
-    )?;
-    let branches = String::from_utf8_lossy(&branches);
-    text.push_str(&format!(
-        "Rama: {}\n",
-        branches.lines().collect::<Vec<_>>().join(", ")
-    ));
-    // A repository need not have tags on either side of this commit.
-    let preceding = run(root, &["describe", "--tags", "--abbrev=0", hash]).unwrap_or_default();
-    let following = run(root, &["describe", "--contains", "--tags", hash]).unwrap_or_default();
-    let following = String::from_utf8_lossy(&following);
-    let following = following.trim_end().split(['~', '^']).next().unwrap_or("");
-    text.push_str(&format!(
-        "Sigue-a: {}\nPrecede-a: {following}\n\n",
-        String::from_utf8_lossy(&preceding).trim_end()
-    ));
+    // Who wrote it and who put it in, and nothing else over the message: the parents,
+    // the branches and the tags around it were more than anyone read.
+    let _ = parents;
+    let mut text = format!("{AUTHOR_LABEL}{author}\n{COMMITTER_LABEL}{committer}\n\n");
     for line in message.split_terminator('\n') {
         text.push_str(line);
         text.push('\n');

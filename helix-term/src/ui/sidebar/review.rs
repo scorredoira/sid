@@ -25,7 +25,14 @@ impl ParsedReview {
         let mut introduction = Review::default();
         push(&mut lines, &mut introduction, "Commit", LineKind::Header);
         for line in text.split_terminator('\n') {
-            push(&mut lines, &mut introduction, line, LineKind::Context);
+            let kind = if line.starts_with(super::git::AUTHOR_LABEL)
+                || line.starts_with(super::git::COMMITTER_LABEL)
+            {
+                LineKind::Person
+            } else {
+                LineKind::Context
+            };
+            push(&mut lines, &mut introduction, line, kind);
         }
         for _ in 0..FILE_GAP {
             push(&mut lines, &mut introduction, "", LineKind::Separator);
@@ -609,9 +616,10 @@ mod tests {
         git(&["tag", "v1"]);
         let info = super::super::git::commit_text(root, "HEAD").unwrap();
         assert!(info.contains("Autor: Review test <review@example.invalid>"));
-        assert!(info.contains("Committer: Review test <review@example.invalid>"));
+        assert!(info.contains("Committer: Review test <review@example.invalid>  "));
+        assert!(info.contains("+0200\n\nroot\n") || info.contains("00\n\nroot\n"));
         assert!(!info.contains("Padre:"));
-        assert!(info.contains("Rama: main\nSigue-a: v1\nPrecede-a: v1\n"));
+        assert!(!info.contains("Rama:"));
         assert!(info.contains("root\n\nFull body: café\n\ndiff --git is prose here.\n"));
         assert!(info.ends_with("Archivos: 2 · Líneas añadidas: +1 · Líneas eliminadas: −0\n"));
         let patch = super::super::git::show(root, "HEAD", &[".".into()], false).unwrap();
@@ -635,20 +643,15 @@ mod tests {
         assert_eq!(parsed.review.lines[1].kind, LineKind::Removed);
         assert_eq!(parsed.review.lines[2].kind, LineKind::Added);
         let info = super::super::git::commit_text(root, "HEAD").unwrap();
-        assert_eq!(
-            info.lines()
-                .filter(|line| line.starts_with("Padre:"))
-                .count(),
-            2
-        );
-        assert!(info.contains(" (main)\n"));
-        assert!(info.contains(" (topic)\n"));
-        assert!(info.contains("Sigue-a: v1\nPrecede-a: \n"));
+        assert!(!info.contains("Padre:"));
         assert!(info.ends_with("Archivos: 1 · Líneas añadidas: +1 · Líneas eliminadas: −1\n"));
         let anchor = parsed.review.anchor(1).unwrap();
         let mut parsed = parsed;
         parsed.prepend_commit(&info);
         assert!(parsed.text.starts_with("Commit\nAutor:"));
+        assert_eq!(parsed.review.lines[1].kind, LineKind::Person);
+        assert_eq!(parsed.review.lines[2].kind, LineKind::Person);
+        assert_eq!(parsed.review.lines[3].kind, LineKind::Context);
         assert!(parsed.text.contains("\nmerge\n"));
         // The message is set apart from the first file by blank lines, no heading between.
         assert!(parsed.text.contains("\n\n\ncafé file.rs\n"));

@@ -36,8 +36,8 @@ pub struct CommitsTab {
     history_list: List,
     files_focused: bool,
     files_visible: bool,
-    /// Whether Enter has put the commit's diff on screen; the code column shows for it,
-    /// or for the files pane.
+    /// Whether the commit's diff is on screen in the code column: Enter puts it there
+    /// and takes it away; showing the files brings it too, hiding them leaves it.
     code_open: bool,
     /// How the files were laid out the last time the rows were built.
     layout: CommitFiles,
@@ -148,18 +148,17 @@ impl CommitsTab {
         self.files_visible
     }
 
-    /// Whether the code column is wanted: for a diff Enter asked for, or for the files.
+    /// Whether the code column is wanted, for the diff on screen.
     pub fn code_open(&self) -> bool {
-        self.code_open || self.files_visible
+        self.code_open
     }
 
     /// Enter on a commit: its diff in the code column, following the cursor over the
-    /// history; Enter again puts the code away, and the files with it if they were shown.
+    /// history; Enter again puts the code away. The files are a pane of their own,
+    /// F9's, and stay as they are.
     fn toggle_code(&mut self, cx: &mut TabContext) {
-        if self.code_open() {
+        if self.code_open {
             self.code_open = false;
-            self.files_visible = false;
-            self.files_focused = false;
         } else {
             self.code_open = true;
             self.follow = true;
@@ -168,8 +167,12 @@ impl CommitsTab {
     }
 
     /// F9: the files of the commit the history cursor is on, with the keys in them, or
-    /// the pane put away.
+    /// the pane put away. Showing them brings the code, their diffs being what they are
+    /// for; hiding them leaves the code as it is, the pane being one of its own.
     pub fn toggle_files(&mut self, cx: &mut TabContext) {
+        if !self.files_visible {
+            self.code_open = true;
+        }
         self.set_files_visible(cx, !self.files_visible, true);
     }
 

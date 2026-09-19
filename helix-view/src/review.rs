@@ -12,6 +12,9 @@ pub enum LineKind {
     Header,
     Separator,
     Note,
+    /// A line naming a person of the commit, `Label: Name <mail>  date`: the name is
+    /// set apart when drawn.
+    Person,
     Context,
     Added,
     Removed,
@@ -213,9 +216,30 @@ impl Review {
         text: &Rope,
         lines: Range<usize>,
         loader: &Loader,
+        theme: &crate::Theme,
     ) -> Vec<OverlayHighlights> {
         let mut layers: Vec<Vec<(Highlight, Range<usize>)>> = Vec::new();
         for line in lines {
+            if self
+                .lines
+                .get(line)
+                .is_some_and(|line| line.kind == LineKind::Person)
+            {
+                // The name, between the label and the address, reads as a heading does:
+                // its colour, and bold over it.
+                if let Some(range) = person_name(text, line) {
+                    let scopes = ["markup.heading", "markup.bold"];
+                    for (depth, scope) in scopes.into_iter().enumerate() {
+                        if let Some(highlight) = theme.find_highlight(scope) {
+                            if layers.len() <= depth {
+                                layers.push(Vec::new());
+                            }
+                            layers[depth].push((highlight, range.clone()));
+                        }
+                    }
+                }
+                continue;
+            }
             let Some((source, source_line)) = self.lines.get(line).and_then(|line| line.source)
             else {
                 continue;
@@ -259,6 +283,21 @@ impl Review {
     }
 }
 
+/// The chars of the name on a person's line: after the label's `: `, up to the ` <` of
+/// the address, or the end of the line without one.
+fn person_name(text: &Rope, line: usize) -> Option<Range<usize>> {
+    let start = text.line_to_char(line);
+    let row: String = text.line(line).chars().collect();
+    let row = row.trim_end_matches('\n');
+    let label_end = row.find(": ")? + 2;
+    let name_end = row[label_end..]
+        .find(" <")
+        .map_or(row.len(), |at| label_end + at);
+    let from = start + row[..label_end].chars().count();
+    let to = start + row[..name_end].chars().count();
+    (to > from).then_some(from..to)
+}
+
 /// Review backgrounds use the theme's code colours with a light tint, leaving syntax
 /// foregrounds free to describe the language. Themes can override each band explicitly.
 pub fn line_style(kind: LineKind, theme: &crate::Theme) -> crate::graphics::Style {
@@ -269,7 +308,7 @@ pub fn line_style(kind: LineKind, theme: &crate::Theme) -> crate::graphics::Styl
             .unwrap_or_else(|| theme.get("ui.statusline"))
             .add_modifier(Modifier::BOLD),
         LineKind::Separator | LineKind::Note => theme.get("ui.text.inactive"),
-        LineKind::Context => Style::default(),
+        LineKind::Context | LineKind::Person => Style::default(),
         LineKind::Added | LineKind::Removed => {
             let (scope, fallback) = if kind == LineKind::Added {
                 ("ui.diff.added", "diff.plus")
