@@ -140,14 +140,22 @@ fn xml(text: &str, indent: &str, newline: &str) -> Result<String, String> {
                     ))
                 }
             },
-            Piece::Text(text) => {
-                if let Some(element) = open.last_mut() {
+            Piece::Text(text) => match open.last_mut() {
+                Some(element) => {
                     element.text = true;
                     // Text and spaces separating inline elements are character data.
                     // Only line breaks with indentation between structural tags reflow.
                     element.preserve |= !text.trim().is_empty() || !text.contains(['\n', '\r']);
                 }
-            }
+                // Reflowing would drop it: nothing outside the root is kept.
+                None if !text.trim().is_empty() => {
+                    return Err(
+                        "Not valid XML, left as it was: text outside the root element"
+                            .to_string(),
+                    );
+                }
+                None => {}
+            },
             Piece::Whole(text) => {
                 if let Some(element) = open.last_mut() {
                     element.markup = true;
@@ -285,7 +293,8 @@ fn xml_pieces(text: &str) -> Result<Vec<Piece<'_>>, String> {
             rest = &rest[length..];
             continue;
         }
-        // A tag ends at the first `>` outside quotes; a DOCTYPE may hold brackets too.
+        // A tag ends at the first `>` outside quotes. A DOCTYPE may hold an internal
+        // subset in brackets, with whole declarations - tags of their own - inside it.
         let mut quote = None;
         let mut brackets = 0usize;
         let mut end = None;
@@ -300,7 +309,7 @@ fn xml_pieces(text: &str) -> Result<Vec<Piece<'_>>, String> {
                     end = Some(at + 1);
                     break;
                 }
-                (None, '<') => return Err(unterminated("tag")),
+                (None, '<') if brackets == 0 => return Err(unterminated("tag")),
                 _ => {}
             }
         }
@@ -365,6 +374,31 @@ mod tests {
         assert!(xml("<a><b></a>", "  ", "\n").is_err());
         assert!(xml("<a>", "  ", "\n").is_err());
         assert!(xml("<a><!-- open </a>", "  ", "\n").is_err());
+    }
+
+    #[test]
+    fn text_outside_the_root_element_is_refused_rather_than_dropped() {
+        let err = xml("<a/>\nhello\n<b/>", "  ", "\n").unwrap_err();
+        assert!(err.contains("text outside the root element"), "{err}");
+        assert!(xml("<a></a>\ntail", "  ", "\n").is_err());
+        assert!(xml("head <a/>", "  ", "\n").is_err());
+        // Line breaks and indentation around the root are not text.
+        assert_eq!(xml("\n  <a/>\n\n", "  ", "\n").unwrap(), "<a/>\n");
+    }
+
+    #[test]
+    fn a_doctype_with_an_internal_subset_is_one_piece() {
+        let text = "<!DOCTYPE x [<!ENTITY a \"b\"><!ELEMENT x (#PCDATA)>]><x>&a;</x>";
+        assert_eq!(
+            xml(text, "  ", "\n").unwrap(),
+            "<!DOCTYPE x [<!ENTITY a \"b\"><!ELEMENT x (#PCDATA)>]>\n<x>&a;</x>\n"
+        );
+        // A bracket inside a quoted value does not open a subset.
+        assert_eq!(
+            xml("<!DOCTYPE x \"[\"><x/>", "  ", "\n").unwrap(),
+            "<!DOCTYPE x \"[\">\n<x/>\n"
+        );
+        assert!(xml("<!DOCTYPE x [<!ENTITY a \"b\">", "  ", "\n").is_err());
     }
 
     #[test]
