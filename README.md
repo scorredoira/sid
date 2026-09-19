@@ -71,11 +71,12 @@ buffer, `Ctrl-f` searches the file, `F2` renames a symbol. Nothing the tree does
 is bound over them.
 
 `Ctrl-b` shows or hides it and `Ctrl-e` focuses it; started on a file
-(`sid foo.ts`), the editor opens without it. It is a column down the left with
-the code beside it, or, with the setting **The code, with the sidebar on
-screen** (`sidebar.code`, `beside` or `below`), a band across the top with the
-code under it, both the whole width; the rule between them drags, and where it
-was dragged to is kept. It follows the file you are
+(`sid foo.ts`), the editor opens without it. The tree is a column down the
+left with the code beside it, always. The Changes and Commits tabs can run
+across the top instead, with the code under them, both the whole width: the
+setting **The code, with the changes or the commits on screen**
+(`sidebar.code`, `beside` or `below`) chooses; the rule between them drags,
+and where it was dragged to is kept. It follows the file you are
 editing, and `Ctrl-r` takes you to that file in the tree from wherever
 you are. Inside it the arrows move, `Enter`
 opens, and **typing walks to the file whose name you are typing**, the way an

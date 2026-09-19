@@ -136,9 +136,9 @@ const SETTINGS: &[Setting] = &[
         also: "",
     },
     Setting {
-        label: "The code, with the sidebar on screen",
+        label: "The code, with the changes or the commits on screen",
         key: "sidebar.code",
-        kind: Kind::Words(&[("beside", "beside it"), ("below", "under it")]),
+        kind: Kind::Words(&[("beside", "beside them"), ("below", "under them")]),
         also: "sidebar layout position top bottom right below beside horizontal vertical",
     },
     Setting {

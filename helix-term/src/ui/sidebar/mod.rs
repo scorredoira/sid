@@ -130,9 +130,9 @@ pub struct Sidebar {
     /// Whether the Commits tab stands alone, without the strip of tabs over it: how
     /// `--commits` opens, until another tab is shown.
     alone: bool,
-    /// Whether the sidebar runs across the top of the screen with the code under it,
-    /// instead of down the left with the code beside it. The setting, read each render.
-    below: bool,
+    /// Whether the setting puts the code under the sidebar for the git tabs; the tree
+    /// is always a column at the left with the code beside it. Told before each render.
+    below_setting: bool,
     /// The rows it was dragged to across the top; none before it ever was.
     height: Option<u16>,
     /// Whether the first render has laid the rows out; before it there is no editor to ask.
@@ -239,7 +239,7 @@ impl Sidebar {
             focused: false,
             code_hidden: false,
             alone: false,
-            below: false,
+            below_setting: false,
             height,
             built: false,
             revealed: None,
@@ -268,11 +268,13 @@ impl Sidebar {
     /// Where the code goes, from the setting: beside the sidebar, or under it. Told
     /// before each render, so the areas are cut the way it says.
     pub fn place(&mut self, below: bool) {
-        self.below = below;
+        self.below_setting = below;
     }
 
+    /// Whether the sidebar runs across the top with the code under it: only for the
+    /// Changes and Commits tabs, when the setting says so. Files is always beside.
     pub fn below(&self) -> bool {
-        self.below
+        self.below_setting && self.tab != TabKind::Files
     }
 
     /// Commits starts at half the terminal, capped for wide monitors; explicit drags win.
@@ -289,7 +291,7 @@ impl Sidebar {
     fn pane_areas(&self) -> Option<[Rect; 2]> {
         match self.tab {
             TabKind::Commits if self.commits.has_files() => {
-                self.commit_layout.panes(self.area, self.below)
+                self.commit_layout.panes(self.area, self.below())
             }
             TabKind::Files if self.outline.shown() => self.outline.panes(self.area),
             _ => None,
@@ -404,7 +406,7 @@ impl Sidebar {
     /// Two columns need the room of two: a narrow panel is widened when the outline moves
     /// beside the tree, never past half the screen, and the separator drags from there.
     fn widen_for_two_columns(&mut self, editor: &mut Editor) {
-        if self.below || self.code_hidden() || self.area.width >= BESIDE_WIDTH {
+        if self.below() || self.code_hidden() || self.area.width >= BESIDE_WIDTH {
             return;
         }
         let total = self.area.width + editor.tree.area().width;
@@ -1174,7 +1176,7 @@ impl Sidebar {
     pub fn contains(&self, row: u16, column: u16) -> bool {
         self.open
             && row >= self.area.y
-            && row < self.area.bottom() + u16::from(self.below && !self.code_hidden())
+            && row < self.area.bottom() + u16::from(self.below() && !self.code_hidden())
             && column >= self.area.x
             && column < self.area.right()
     }
@@ -1185,7 +1187,7 @@ impl Sidebar {
         let editor = &mut cx.editor;
         // The separator that drags the sidebar's size: the column at its right, or across
         // the top the rule under it.
-        let on_separator = if self.below {
+        let on_separator = if self.below() {
             event.row == self.area.bottom()
         } else {
             event.column == self.area.right().saturating_sub(1)
@@ -1230,14 +1232,18 @@ impl Sidebar {
             }
             MouseEventKind::Drag(MouseButton::Left) if self.resizing_split => {
                 if self.tab == TabKind::Commits {
-                    self.commit_layout
-                        .resize_split(self.area, event.row, event.column, self.below);
+                    self.commit_layout.resize_split(
+                        self.area,
+                        event.row,
+                        event.column,
+                        self.below(),
+                    );
                 } else {
                     self.outline
                         .resize_split(self.area, event.row, event.column);
                 }
             }
-            MouseEventKind::Drag(MouseButton::Left) if self.resizing && self.below => {
+            MouseEventKind::Drag(MouseButton::Left) if self.resizing && self.below() => {
                 // The rows above the rule are the sidebar's; the editor's area is what is
                 // under it, which the rule is not part of.
                 let total = if self.code_hidden() {
@@ -1270,13 +1276,13 @@ impl Sidebar {
                 let split = self.resizing_split;
                 self.resizing = false;
                 self.resizing_split = false;
-                let result = if self.tab == TabKind::Commits && (split || !self.below) {
+                let result = if self.tab == TabKind::Commits && (split || !self.below()) {
                     self.commit_layout.save()
                 } else if split {
                     self.outline.save()
-                } else if let (true, Some(height)) = (self.below, self.height) {
+                } else if let (true, Some(height)) = (self.below(), self.height) {
                     panel_width::save(HEIGHT_FILE, height)
-                } else if let (false, Some(width)) = (self.below, self.width) {
+                } else if let (false, Some(width)) = (self.below(), self.width) {
                     panel_width::save(WIDTH_FILE, width)
                 } else {
                     Ok(())
@@ -1514,7 +1520,7 @@ impl Sidebar {
         let content_width = area.width.saturating_sub(1) as usize;
         // Across the top the rule under the sidebar is the editor's to draw, and the last
         // column stays clear.
-        if !self.below {
+        if !self.below() {
             for y in area.y..area.bottom() {
                 surface.set_string(area.right() - 1, y, "│", separator_style);
             }
@@ -1610,7 +1616,7 @@ impl Sidebar {
                 for x in area.x..area.right().saturating_sub(1) {
                     surface.set_string(x, lower_area.y, "─", separator_style);
                 }
-                let corner = if self.below { "─" } else { "┤" };
+                let corner = if self.below() { "─" } else { "┤" };
                 surface.set_string(area.right() - 1, lower_area.y, corner, separator_style);
                 area.x + 1
             };
