@@ -429,10 +429,66 @@ fn edit(
         // Every shortcut lives under [keys.<table>], and a chord is a table per key.
         let mut names = vec!["keys".to_string(), table.to_string()];
         names.extend(chord.iter().map(ToString::to_string));
-        put(&mut document, path, &names, &last.to_string(), &value)?;
+        let (names, last) = as_spelt(&document, &names, &last.to_string());
+        put(&mut document, path, &names, &last, &value)?;
+    }
+    // A key given to every mode is taken from the modes that had it: [keys.all] is laid
+    // under each mode's own table, so a line of yours under [keys.normal] would still
+    // win over the one just written, and the key would go on doing the old thing there.
+    if place == Where::Anywhere {
+        for table in TABLES.iter().skip(1) {
+            let mut names = vec!["keys".to_string(), table.to_string()];
+            names.extend(chord.iter().map(ToString::to_string));
+            let (names, last) = as_spelt(&document, &names, &last.to_string());
+            prune(document.as_table_mut(), &names, &last);
+        }
     }
 
     crate::ui::settings::write_atomically(path, document.to_string())
+}
+
+/// Every table `config.toml` keeps shortcuts under.
+pub const TABLES: [&str; 4] = ["all", "normal", "select", "insert"];
+
+/// The path as the file spells it: the tables by name, and each key by whatever spelling
+/// of it the file has, so "C-A-j" finds a line you wrote as "A-C-j". A key the file does
+/// not have keeps the spelling it was asked for by.
+fn as_spelt(
+    document: &toml_edit::DocumentMut,
+    names: &[String],
+    last: &str,
+) -> (Vec<String>, String) {
+    let mut spelt = Vec::with_capacity(names.len());
+    let mut table: Option<&dyn toml_edit::TableLike> = Some(document.as_table());
+    for (depth, name) in names.iter().enumerate() {
+        // The first two names are "keys" and the table's: only what follows is keys.
+        let name = match table {
+            Some(table) if depth >= 2 => spelling(table, name),
+            _ => name.clone(),
+        };
+        table = table
+            .and_then(|table| table.get(&name))
+            .and_then(toml_edit::Item::as_table_like);
+        spelt.push(name);
+    }
+    let last = match table {
+        Some(table) => spelling(table, last),
+        None => last.to_string(),
+    };
+    (spelt, last)
+}
+
+/// How the table spells the key, if it has it at all.
+fn spelling(table: &dyn toml_edit::TableLike, key: &str) -> String {
+    let Ok(wanted) = key.parse::<KeyEvent>() else {
+        return key.to_string();
+    };
+    table
+        .iter()
+        .map(|(name, _)| name)
+        .find(|name| name.parse::<KeyEvent>().ok() == Some(wanted))
+        .map(String::from)
+        .unwrap_or_else(|| key.to_string())
 }
 
 /// One entry written, or dropped when there is no value for it.
@@ -671,6 +727,52 @@ mod tests {
         erase(&path, both, &keys("F7"), false).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(!written.contains("F7"), "{written}");
+    }
+
+    #[test]
+    fn a_key_given_to_every_mode_is_taken_from_the_modes_that_had_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[keys.normal]\nC-A-j = \"select_all\"\n\n[keys.insert]\nC-A-j = \"no_op\"\n",
+        )
+        .unwrap();
+
+        write(
+            &path,
+            Where::Anywhere,
+            &keys("C-A-j"),
+            &Runs::One("duplicate_line".into()),
+        )
+        .unwrap();
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            written.contains("[keys.all]\nA-C-j = \"duplicate_line\""),
+            "{written}"
+        );
+        // Your lines are found however you spelt the key: "C-A-j" is "A-C-j".
+        assert!(!written.contains("keys.normal"), "{written}");
+        assert!(!written.contains("keys.insert"), "{written}");
+        // And the editor runs the new one in every mode, the old lines being gone.
+        let text = crate::config::over_defaults(&written).unwrap();
+        let config = crate::config::Config::load(Ok(&text), Err(Default::default())).unwrap();
+        for mode in MODES {
+            match config.keys[&mode].search(&keys("C-A-j")) {
+                Some(KeyTrie::MappableCommand(command)) => {
+                    assert_eq!(command.name(), "duplicate_line")
+                }
+                other => panic!("{mode:?}: {other:?}"),
+            }
+        }
+
+        // Taking one of sid's away everywhere neutralises a line of yours in a mode too.
+        std::fs::write(&path, "[keys.normal]\nC-s = \"select_all\"\n").unwrap();
+        erase(&path, Where::Anywhere, &keys("C-s"), true).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("[keys.all]\nC-s = \"no_op\""), "{written}");
+        assert!(!written.contains("select_all"), "{written}");
     }
 
     #[test]
