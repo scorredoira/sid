@@ -225,22 +225,15 @@ impl ChangesTab {
 }
 
 /// Asks before the working changes of `file` are thrown away, in the box every question
-/// is asked in.
+/// is asked in. A buffer open on the file with edits not saved yet goes with it — closed
+/// when the file is deleted, read again from disk when it is restored — and the box says
+/// so first, as the tree's own deletion does.
 pub fn confirm_discard(cx: &mut commands::Context, root: &Path, file: ChangedFile) {
     {
         let relative = file.path.strip_prefix(root).unwrap_or(&file.path);
         let name = relative.display().to_string();
-        let lines = if file.is_untracked() {
-            vec![
-                format!("Delete \"{name}\"?"),
-                "Git does not have it: there is nothing to get it back from.".to_string(),
-            ]
-        } else {
-            vec![
-                format!("Discard the changes to \"{name}\"?"),
-                "What is not staged is lost.".to_string(),
-            ]
-        };
+        let unsaved = super::files::unsaved_under(cx.editor, &file.path);
+        let lines = discard_question(&name, file.is_untracked(), unsaved);
         let answers = vec![
             Answer::new("Cancel", Box::new(|_| {})),
             Answer::new(
@@ -265,6 +258,27 @@ pub fn confirm_discard(cx: &mut commands::Context, root: &Path, file: ChangedFil
         ];
         cx.push_layer(Box::new(Confirm::new("Confirm", lines, answers)));
     }
+}
+
+/// What the box asks before `name` is discarded: deleted when git does not have it,
+/// restored otherwise, and, when a buffer holds edits to it not saved yet, that those go
+/// too.
+fn discard_question(name: &str, untracked: bool, unsaved: bool) -> Vec<String> {
+    let mut lines = if untracked {
+        vec![
+            format!("Delete \"{name}\"?"),
+            "Git does not have it: there is nothing to get it back from.".to_string(),
+        ]
+    } else {
+        vec![
+            format!("Discard the changes to \"{name}\"?"),
+            "What is not staged is lost.".to_string(),
+        ]
+    };
+    if unsaved {
+        lines.push("Unsaved changes to it in the editor will be lost too.".to_string());
+    }
+    lines
 }
 
 /// Reads the document open on `path` again from disk, the way `:reload` does, after git
@@ -404,5 +418,25 @@ impl TabView for ChangesTab {
         self.centered = Some(path.to_path_buf());
         entries::reselect(&self.rows, &mut self.list, Some(path));
         self.list.center();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::discard_question;
+
+    #[test]
+    fn the_question_says_when_unsaved_edits_go_too() {
+        let asked = discard_question("a.rs", false, false);
+        assert_eq!(asked.len(), 2);
+        assert!(asked[0].starts_with("Discard the changes"));
+
+        // Whether the file is deleted or restored, edits not saved yet are named.
+        for untracked in [true, false] {
+            let asked = discard_question("a.rs", untracked, true);
+            assert_eq!(asked.len(), 3);
+            assert!(asked[2].contains("Unsaved changes"));
+        }
+        assert!(discard_question("a.rs", true, false)[0].starts_with("Delete"));
     }
 }

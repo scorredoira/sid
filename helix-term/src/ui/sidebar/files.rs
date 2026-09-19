@@ -801,20 +801,19 @@ pub(super) fn close_documents_under(editor: &mut Editor, target: &Path) {
         .map(|doc| doc.id())
         .collect();
     for id in gone {
+        use helix_view::editor::CloseError;
+        // Closed by force, so a modified buffer never stays: what can still go wrong is
+        // a buffer already gone, which is nothing, or a save that failed.
         match editor.close_document(id, true) {
-            Ok(()) | Err(helix_view::editor::CloseError::DoesNotExist) => {}
-            Err(helix_view::editor::CloseError::BufferModified(name)) => {
-                editor.set_error(format!("{} is modified and stays open", name));
-            }
-            Err(helix_view::editor::CloseError::SaveError(err)) => {
-                editor.set_error(err.to_string());
-            }
+            Ok(()) | Err(CloseError::DoesNotExist | CloseError::BufferModified(_)) => {}
+            Err(CloseError::SaveError(err)) => editor.set_error(err.to_string()),
         }
     }
 }
 
-/// Whether anything open under `path` has changes that deleting it would throw away.
-fn unsaved_under(editor: &Editor, path: &Path) -> bool {
+/// Whether anything open under `path` has changes that deleting it, or reading it again
+/// from disk, would throw away.
+pub(super) fn unsaved_under(editor: &Editor, path: &Path) -> bool {
     editor
         .documents()
         .any(|doc| doc.is_modified() && doc.path().is_some_and(|open| open.starts_with(path)))
