@@ -144,21 +144,24 @@ impl CommitsTab {
         self.files_visible
     }
 
+    /// F9: the files of the commit the history cursor is on, with the keys in them, or
+    /// the pane put away.
     pub fn toggle_files(&mut self, cx: &mut TabContext) {
-        self.set_files_visible(cx, !self.files_visible);
+        self.set_files_visible(cx, !self.files_visible, true);
     }
 
     /// Shows the files of the commit the history cursor is on, or puts the pane away.
-    fn set_files_visible(&mut self, cx: &mut TabContext, visible: bool) {
+    /// With `focus` the keys go into the files; without it they stay in the history.
+    fn set_files_visible(&mut self, cx: &mut TabContext, visible: bool, focus: bool) {
         self.files_visible = visible;
         self.files_focused = false;
         self.follow = true;
         if self.files_visible {
             let commit = self.listed().get(self.history_list.cursor).cloned();
             if let Some(commit) = commit {
-                self.open_commit(commit, true);
+                self.open_commit(commit, focus);
             } else {
-                self.focus_files(true);
+                self.focus_files(focus);
             }
         }
         self.preview(cx);
@@ -765,9 +768,11 @@ impl TabView for CommitsTab {
         match (row, how) {
             // Enter or a double click on a commit opens the files it touched under the
             // history, and pressed again closes them: the same pane F9 shows, for the
-            // commit the cursor is on.
+            // commit the cursor is on. The keys stay in the history, so the next Enter
+            // is the one that closes, and the arrows go on over the commits; Alt-Down
+            // takes the keys into the files.
             (Row::Commit(_), Activation::Enter | Activation::Double) if in_history => {
-                self.toggle_files(cx);
+                self.set_files_visible(cx, !self.files_visible, false);
                 Outcome::Stay
             }
             (Row::Commit(row), _) if in_history => {

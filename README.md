@@ -201,9 +201,11 @@ repository it says so and does not start. `Enter` or a double click opens one: t
 appear under the history, and beside them the code column with the commit's
 message and the diff of every file, each file's diff set apart from the next
 with room between them. The diff then follows whatever the cursor is on in the
-files: a directory, or one file, shown on its own without the message. `Enter`
-or a double click on the commit again puts the files and the code away, as `F9`
-does, and `Esc` closes the commit and leaves the history alone again; `F7` hides or shows
+files: a directory, or one file, shown on its own without the message. The keys
+stay in the history, so the arrows go on over the commits and `Enter` or a
+double click on the commit again puts the files and the code away, as `F9`
+does; `Alt-Down` takes the keys into the files and `Alt-Up` brings them back.
+`Esc` closes the commit and leaves the history alone again; `F7` hides or shows
 the code in between. `/` opens a filter on the top row: the history narrows to
 the commits whose hash starts with what you type (`45f740db8`) or whose subject
 or author contains it, looking through the whole history, not only what is on
