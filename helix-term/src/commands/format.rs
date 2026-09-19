@@ -99,15 +99,39 @@ enum Piece<'a> {
 fn xml(text: &str, indent: &str, newline: &str) -> Result<String, String> {
     let pieces = xml_pieces(text)?;
 
-    let mut open: Vec<&str> = Vec::new();
-    for piece in &pieces {
+    struct Element<'a> {
+        name: &'a str,
+        start: usize,
+        preserve: bool,
+        text: bool,
+        markup: bool,
+    }
+    let mut open: Vec<Element<'_>> = Vec::new();
+    let mut preserved = vec![None; pieces.len()];
+    for (index, piece) in pieces.iter().enumerate() {
         match piece {
-            Piece::Open { name, .. } => open.push(name),
+            Piece::Open { name, text } => {
+                if let Some(parent) = open.last_mut() {
+                    parent.markup = true;
+                }
+                open.push(Element {
+                    name,
+                    start: index,
+                    preserve: preserves_xml_space(text),
+                    text: false,
+                    markup: false,
+                });
+            }
             Piece::Close { name, .. } => match open.pop() {
-                Some(expected) if expected == *name => {}
-                Some(expected) => {
+                Some(element) if element.name == *name => {
+                    if element.preserve || (element.text && !element.markup) {
+                        preserved[element.start] = Some(index);
+                    }
+                }
+                Some(element) => {
                     return Err(format!(
-                        "Not valid XML, left as it was: </{name}> closes <{expected}>"
+                        "Not valid XML, left as it was: </{name}> closes <{}>",
+                        element.name
                     ))
                 }
                 None => {
@@ -116,12 +140,26 @@ fn xml(text: &str, indent: &str, newline: &str) -> Result<String, String> {
                     ))
                 }
             },
-            _ => {}
+            Piece::Text(text) => {
+                if let Some(element) = open.last_mut() {
+                    element.text = true;
+                    // Text and spaces separating inline elements are character data.
+                    // Only line breaks with indentation between structural tags reflow.
+                    element.preserve |= !text.trim().is_empty() || !text.contains(['\n', '\r']);
+                }
+            }
+            Piece::Whole(text) => {
+                if let Some(element) = open.last_mut() {
+                    element.markup = true;
+                    element.preserve |= text.starts_with("<![CDATA[");
+                }
+            }
         }
     }
-    if let Some(name) = open.pop() {
+    if let Some(element) = open.pop() {
         return Err(format!(
-            "Not valid XML, left as it was: <{name}> is never closed"
+            "Not valid XML, left as it was: <{}> is never closed",
+            element.name
         ));
     }
 
@@ -138,6 +176,22 @@ fn xml(text: &str, indent: &str, newline: &str) -> Result<String, String> {
         out.push_str(content);
     };
     while index < pieces.len() {
+        if let Some(end) = preserved[index] {
+            // Keep the entire subtree verbatim, including inherited xml:space and
+            // whitespace around nested inline tags, comments and CDATA.
+            let raw: String = pieces[index..=end]
+                .iter()
+                .map(|piece| match piece {
+                    Piece::Open { text, .. }
+                    | Piece::Close { text, .. }
+                    | Piece::Whole(text)
+                    | Piece::Text(text) => *text,
+                })
+                .collect();
+            line(&mut out, depth, &raw);
+            index = end + 1;
+            continue;
+        }
         match &pieces[index] {
             Piece::Open { name, text } => {
                 // An element holding only text stays on one line: `<name>text</name>`.
@@ -160,7 +214,7 @@ fn xml(text: &str, indent: &str, newline: &str) -> Result<String, String> {
                             text: close,
                         }),
                     ) if closing == name => {
-                        line(&mut out, depth, &format!("{text}{}{close}", inner.trim()));
+                        line(&mut out, depth, &format!("{text}{}{close}", inner));
                         index += 3;
                         continue;
                     }
@@ -174,7 +228,7 @@ fn xml(text: &str, indent: &str, newline: &str) -> Result<String, String> {
                 line(&mut out, depth, text);
             }
             Piece::Whole(text) => line(&mut out, depth, text),
-            Piece::Text(text) => line(&mut out, depth, text.trim()),
+            Piece::Text(_) => {} // Indentation outside a preserved subtree.
         }
         index += 1;
     }
@@ -182,19 +236,41 @@ fn xml(text: &str, indent: &str, newline: &str) -> Result<String, String> {
     Ok(out)
 }
 
-/// Cuts a document into its pieces; text that is only whitespace is dropped.
+/// Reads the attribute rather than matching words inside another attribute's value.
+fn preserves_xml_space(tag: &str) -> bool {
+    let Some(start) = tag.find(char::is_whitespace) else {
+        return false;
+    };
+    let mut attributes = &tag[start..];
+    while let Some((name, value)) = attributes.trim_start().split_once('=') {
+        let value = value.trim_start();
+        let Some(quote @ ('\'' | '"')) = value.chars().next() else {
+            break;
+        };
+        let Some(end) = value[1..].find(quote).map(|end| end + 1) else {
+            break;
+        };
+        if name.trim() == "xml:space" && &value[1..end] == "preserve" {
+            return true;
+        }
+        attributes = &value[end + 1..];
+    }
+    false
+}
+
+/// Cuts a document into its pieces, keeping character data exactly as written.
 fn xml_pieces(text: &str) -> Result<Vec<Piece<'_>>, String> {
     let unterminated = |what: &str| format!("Not valid XML, left as it was: unterminated {what}");
     let mut pieces = Vec::new();
     let mut rest = text;
     while !rest.is_empty() {
         let Some(start) = rest.find('<') else {
-            if !rest.trim().is_empty() {
+            if !rest.is_empty() {
                 pieces.push(Piece::Text(rest));
             }
             break;
         };
-        if !rest[..start].trim().is_empty() {
+        if start > 0 {
             pieces.push(Piece::Text(&rest[..start]));
         }
         rest = &rest[start..];
@@ -275,11 +351,11 @@ mod tests {
     #[test]
     fn xml_is_indented_keeping_text_elements_on_one_line() {
         let text = "<?xml version=\"1.0\"?><root a=\"x > y\"><!-- note --><name>  Golf </name>\
-            <empty/><list><item>1</item><item></item></list><![CDATA[<raw>]]></root>";
+            <empty/><list><item>1</item><item></item></list><raw><![CDATA[<raw>]]></raw></root>";
         let formatted = xml(text, "  ", "\n").unwrap();
         assert_eq!(
             formatted,
-            "<?xml version=\"1.0\"?>\n<root a=\"x > y\">\n  <!-- note -->\n  <name>Golf</name>\n  <empty/>\n  <list>\n    <item>1</item>\n    <item></item>\n  </list>\n  <![CDATA[<raw>]]>\n</root>\n"
+            "<?xml version=\"1.0\"?>\n<root a=\"x > y\">\n  <!-- note -->\n  <name>  Golf </name>\n  <empty/>\n  <list>\n    <item>1</item>\n    <item></item>\n  </list>\n  <raw><![CDATA[<raw>]]></raw>\n</root>\n"
         );
         assert_eq!(xml(&formatted, "  ", "\n").unwrap(), formatted);
     }
@@ -289,5 +365,29 @@ mod tests {
         assert!(xml("<a><b></a>", "  ", "\n").is_err());
         assert!(xml("<a>", "  ", "\n").is_err());
         assert!(xml("<a><!-- open </a>", "  ", "\n").is_err());
+    }
+
+    #[test]
+    fn xml_preserves_text_and_space_sensitive_subtrees() {
+        for text in [
+            "<root xml:space=\"preserve\">  keep these spaces  </root>",
+            "<root xml:space = 'preserve'><a/> \n <b/></root>",
+            "<root><name>  Golf </name></root>",
+            "<root><space> \t </space></root>",
+            "<p>Hello <b>world</b> !</p>",
+            "<p><b>Hello</b> <i>world</i>!</p>",
+            "<p><![CDATA[  text  ]]><b>more</b></p>",
+        ] {
+            let formatted = xml(text, "  ", "\n").unwrap();
+            // Compare the literal character data, including whitespace-only leaves.
+            let expected = if text.starts_with("<root><") {
+                text.replacen("<root>", "<root>\n  ", 1)
+                    .replace("</root>", "\n</root>\n")
+            } else {
+                format!("{text}\n")
+            };
+            assert_eq!(formatted, expected);
+            assert_eq!(xml(&formatted, "  ", "\n").unwrap(), formatted);
+        }
     }
 }
