@@ -256,6 +256,14 @@ impl CommitsTab {
         self.ask_page(0);
     }
 
+    /// Opens `commit` into its files, shown under the history with the keys in them, as
+    /// Enter on the commit would: for a commit reached from elsewhere, a blamed line.
+    pub fn open_commit_with_files(&mut self, commit: Commit) {
+        self.files_visible = true;
+        self.follow = true;
+        self.open_commit(commit, true);
+    }
+
     /// Opens `commit` into its files, the cursor on the file the commit was reached by when
     /// it carries one. The files are asked of git; the commit opens when they land.
     pub fn open_commit(&mut self, commit: Commit, focus: bool) {
@@ -455,11 +463,13 @@ impl CommitsTab {
         self.preview(cx);
     }
 
+    /// Esc: the commit is closed and the history stands alone again, where it was.
     fn leave_commit(&mut self, cx: &mut TabContext) {
         let Some(opened) = self.opened.take() else {
             return;
         };
         self.files_focused = false;
+        self.files_visible = false;
         self.opening = None;
         self.rebuild(cx.editor);
         // The history may have been read again meanwhile, so the commit is found by its hash.

@@ -406,6 +406,15 @@ impl Sidebar {
         self.showing(TabKind::Commits) && self.code_hidden
     }
 
+    /// The Commits tab has the whole width to itself until a commit is opened: the code
+    /// column comes with the commit's files, and goes when they do. Called where a
+    /// commit is opened or closed, so F7 still hides or shows the code in between.
+    fn settle_code(&mut self) {
+        if self.tab == TabKind::Commits {
+            self.code_hidden = !self.commits.files_visible();
+        }
+    }
+
     pub fn focus_code(&mut self) {
         self.code_hidden = false;
         self.focused = false;
@@ -506,6 +515,7 @@ impl Sidebar {
             diff: &mut self.diff,
         };
         self.commits.toggle_files(&mut cx);
+        self.settle_code();
     }
 
     pub fn toggle_code(&mut self, editor: &mut Editor) {
@@ -613,6 +623,7 @@ impl Sidebar {
             diff: &mut self.diff,
         };
         self.commits.show_history(&mut cx, path);
+        self.settle_code();
     }
 
     /// Whether the focused view shows an uncommitted diff with the cursor on a line of
@@ -644,7 +655,8 @@ impl Sidebar {
         self.focused = true;
         self.tab = TabKind::Commits;
         self.revealed = None;
-        self.commits.open_commit(commit, true);
+        self.commits.open_commit_with_files(commit);
+        self.settle_code();
     }
 
     /// F5, wherever the focus is: whatever the sidebar shows is asked for again — the
@@ -738,6 +750,7 @@ impl Sidebar {
         if self.tab == TabKind::Files && self.in_git {
             self.changes.ask_if_idle();
         }
+        self.settle_code();
         self.revealed = None;
     }
 
@@ -786,6 +799,7 @@ impl Sidebar {
             // The tab just opened what is now the focused document: nothing to move onto.
             self.revealed = doc!(editor).path().map(Path::to_path_buf);
         }
+        self.settle_code();
         outcome == Outcome::Leave
     }
 
@@ -932,7 +946,9 @@ impl Sidebar {
             (KeyCode::Esc, _) => {
                 let (tab, diff) = self.parts();
                 let mut tab_cx = TabContext { editor, diff };
-                if !tab.step_back(&mut tab_cx) {
+                if tab.step_back(&mut tab_cx) {
+                    self.settle_code();
+                } else {
                     self.code_hidden = false;
                     self.focused = false;
                 }
