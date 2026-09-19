@@ -207,8 +207,10 @@ does, and `Esc` closes the commit and leaves the history alone again; `F7` hides
 the code in between. `/` opens a filter on the top row: the history narrows to
 the commits whose hash starts with what you type (`45f740db8`) or whose subject
 or author contains it, looking through the whole history, not only what is on
-screen — `Esc` brings it all back. History sits above the changed files in one
-column; drag the divider to resize either pane, or its outer edge to adjust the
+screen — `Esc` brings it all back. The files come as a tree, folded like the
+file tree, or one per line with its whole path: the setting **A commit's
+files** (`sidebar.commit-files`, `tree` or `paths`) chooses, and is kept.
+History sits above the changed files in one column; drag the divider to resize either pane, or its outer edge to adjust the
 column width.
 
 Diffs show filenames and highlighted code with old/new line numbers. `F4` toggles

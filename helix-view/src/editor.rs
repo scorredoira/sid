@@ -259,6 +259,8 @@ pub struct SidebarConfig {
     pub open: bool,
     /// Width of the sidebar in columns. Defaults to 32.
     pub width: u16,
+    /// How the files of an opened commit are listed. Defaults to a tree.
+    pub commit_files: CommitFiles,
 }
 
 impl Default for SidebarConfig {
@@ -266,8 +268,20 @@ impl Default for SidebarConfig {
         Self {
             open: true,
             width: 32,
+            commit_files: CommitFiles::Tree,
         }
     }
+}
+
+/// How the files a commit touched are listed under the history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CommitFiles {
+    /// Under the directories that hold them, folded like the file tree.
+    #[default]
+    Tree,
+    /// One line per file, with its whole path from the project's root.
+    Paths,
 }
 
 impl Default for FileExplorerConfig {

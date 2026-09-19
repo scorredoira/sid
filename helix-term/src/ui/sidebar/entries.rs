@@ -390,6 +390,25 @@ pub fn list_changed(root: &Path, files: &[ChangedFile], folds: &Folds, rows: &mu
     list_change_dir(&top, root, 0, folds, rows);
 }
 
+/// Lists changed files one per row, each with its whole path below `root`, in the order
+/// git gave them; a path outside the root is left out.
+pub fn list_paths(root: &Path, files: &[ChangedFile], rows: &mut Vec<Row>) {
+    for file in files {
+        let Ok(relative) = file.path.strip_prefix(root) else {
+            continue;
+        };
+        rows.push(Row::Entry(Entry {
+            path: file.path.clone(),
+            name: relative.to_string_lossy().into_owned(),
+            is_dir: false,
+            depth: 0,
+            change: Some(file.change),
+            staged: file.staged,
+            unstaged: file.unstaged,
+        }));
+    }
+}
+
 /// Files placed under the directories of their paths; a file with no change is one the
 /// filter found on disk.
 #[derive(Default)]

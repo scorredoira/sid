@@ -136,6 +136,12 @@ const SETTINGS: &[Setting] = &[
         also: "",
     },
     Setting {
+        label: "A commit's files",
+        key: "sidebar.commit-files",
+        kind: Kind::Words(&[("tree", "as a tree"), ("paths", "as paths")]),
+        also: "commits files tree flat full path paths",
+    },
+    Setting {
         label: "The mouse",
         key: "mouse",
         kind: Kind::Switch,

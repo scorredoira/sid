@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use helix_core::unicode::width::UnicodeWidthStr;
+use helix_view::editor::CommitFiles;
 use helix_view::graphics::{Modifier, Style};
 use helix_view::{Editor, Theme};
 use tui::buffer::Buffer as Surface;
@@ -35,6 +36,8 @@ pub struct CommitsTab {
     history_list: List,
     files_focused: bool,
     files_visible: bool,
+    /// How the files were laid out the last time the rows were built.
+    layout: CommitFiles,
     showing: Showing,
     /// Counts the times `showing` changed, so a page asked for the previous history is
     /// dropped when it lands.
@@ -106,6 +109,7 @@ impl CommitsTab {
             history_list: List::default(),
             files_focused: false,
             files_visible: false,
+            layout: CommitFiles::Tree,
             showing: Showing::Repository,
             epoch: 0,
             log: None,
@@ -121,6 +125,14 @@ impl CommitsTab {
             whole: None,
             filtered: None,
             follow: false,
+        }
+    }
+
+    /// The files are laid out again when the setting that says how has been changed
+    /// since, from the settings screen or the palette; asked at render.
+    pub fn follow_layout(&mut self, editor: &mut Editor) {
+        if self.opened.is_some() && self.layout != editor.config().sidebar.commit_files {
+            self.rebuild(editor);
         }
     }
 
@@ -666,7 +678,13 @@ impl TabView for CommitsTab {
                 author_width([&opened.commit]),
                 true,
             )));
-            entries::list_changed(&self.root, &opened.files, &opened.folds, &mut rows);
+            self.layout = _editor.config().sidebar.commit_files;
+            match self.layout {
+                CommitFiles::Tree => {
+                    entries::list_changed(&self.root, &opened.files, &opened.folds, &mut rows)
+                }
+                CommitFiles::Paths => entries::list_paths(&self.root, &opened.files, &mut rows),
+            }
         }
         let filter = self.filter.as_deref().filter(|text| !text.is_empty());
         self.filtered = filter.map(|filter| {

@@ -1420,6 +1420,9 @@ impl Sidebar {
             let keys_here = self.focused && self.outline.focused;
             self.outline.sync(editor, keys_here);
         }
+        if self.tab == TabKind::Commits {
+            self.commits.follow_layout(editor);
+        }
 
         let theme = &editor.theme;
         let directory_style = theme.get("ui.text.directory");
@@ -1525,19 +1528,16 @@ impl Sidebar {
                 surface.set_string(area.right() - 1, lower_area.y, "┤", separator_style);
                 area.x + 1
             };
-            let heading = if self.tab == TabKind::Commits {
-                " Files "
-            } else {
-                " Outline "
-            };
-            let (end, _) = surface.set_stringn(
-                heading_x,
-                lower_area.y,
-                heading,
-                (lower_area.width as usize).saturating_sub(2),
-                header_style,
-            );
+            // The files of a commit need no heading: the commit's own row is above
+            // them. The outline has one, with its order beside it.
             if self.tab == TabKind::Files {
+                let (end, _) = surface.set_stringn(
+                    heading_x,
+                    lower_area.y,
+                    " Outline ",
+                    (lower_area.width as usize).saturating_sub(2),
+                    header_style,
+                );
                 // The order, at the right edge of the header, where a click turns it over.
                 let label = format!(" {} ", self.outline.sort_label());
                 let right = lower_area.right().saturating_sub(2);
