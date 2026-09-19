@@ -427,7 +427,7 @@ impl MappableCommand {
         sidebar_collapse, "Collapse every directory of the file tree",
         sidebar_refresh, "Read again what the sidebar shows: the tree, the changes, the commits, the outline",
         toggle_hidden_files, "Show or hide hidden files in the file tree",
-        outline_toggle, "Show or hide the outline of the current file's functions and types, under the file tree",
+        outline_toggle, "Go to the outline of the current file's functions and types, under the file tree, or put it away when the keys are already there",
         outline_sort_toggle, "List the outline by name, or in the order the file defines things",
         review_cycle, "Walk the files, the changes, the commits and the code",
         review_cycle_back, "Walk the code, the commits, the changes and the files, the other way round",

@@ -292,19 +292,37 @@ impl Sidebar {
         self.outline.by_name()
     }
 
-    /// Hides the outline when it is on screen; otherwise brings the tree on screen with
-    /// the outline under it. The keys stay in the text: Ctrl-E takes them to the outline.
+    /// Ctrl-Alt-o: one key into the outline and the same key out. It brings the outline on
+    /// screen, with the tree, and gives it the keys, as Ctrl-E does for the sidebar; when
+    /// the outline already has them it is put away and the keys go back to the code, as
+    /// Ctrl-B does from a focused sidebar. From the code with the outline on screen it
+    /// only moves the keys there.
     pub fn toggle_outline(&mut self, editor: &mut Editor) {
-        if self.outline_visible() {
-            self.outline.set_shown(false);
-            if self.focused {
-                self.focus_code();
-            }
+        let keys_in_outline = self.outline_visible() && self.focused && self.outline.focused;
+        if keys_in_outline {
+            self.hide_outline();
             return;
         }
+        self.show_outline(editor);
+        self.focused = true;
+        self.outline.focused = true;
+    }
+
+    /// Brings the tree on screen with the outline under it, or beside it; the keys stay
+    /// where they are.
+    pub fn show_outline(&mut self, editor: &mut Editor) {
         self.show_files(editor);
         self.outline.set_shown(true);
         self.outline.sync(editor, false);
+    }
+
+    /// Puts the outline away; keys that were in it go back to the code.
+    pub fn hide_outline(&mut self) {
+        let had_keys = self.focused && self.outline.focused;
+        self.outline.set_shown(false);
+        if had_keys {
+            self.focus_code();
+        }
     }
 
     /// A language server answered the outline's question about a file.
@@ -1705,6 +1723,7 @@ fn open_menu(
                 }),
             ));
         }
+        // Shown or hidden as the entry says; the key is the way in with the keys.
         entries.extend([context_menu::Entry::new(
             if outline {
                 "Hide the outline"
@@ -1712,9 +1731,13 @@ fn open_menu(
                 "Show the outline"
             },
             "Ctrl-Alt-o",
-            Box::new(|compositor, cx| {
+            Box::new(move |compositor, cx| {
                 if let Some(view) = compositor.find::<editor::EditorView>() {
-                    view.sidebar.toggle_outline(cx.editor);
+                    if outline {
+                        view.sidebar.hide_outline();
+                    } else {
+                        view.sidebar.show_outline(cx.editor);
+                    }
                 }
             }),
         )]);
@@ -1790,9 +1813,9 @@ fn open_outline_menu(
             context_menu::Entry::new(
                 "Hide the outline",
                 "Ctrl-Alt-o",
-                Box::new(|compositor, cx| {
+                Box::new(|compositor, _cx| {
                     if let Some(view) = compositor.find::<editor::EditorView>() {
-                        view.sidebar.toggle_outline(cx.editor);
+                        view.sidebar.hide_outline();
                     }
                 }),
             ),
