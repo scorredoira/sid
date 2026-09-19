@@ -2672,9 +2672,7 @@ fn review_menu_entries(
                 "Changes and commits"
             },
             "F6",
-            Box::new(|compositor, cx| {
-                run_command(compositor, cx, MappableCommand::review_cycle)
-            }),
+            Box::new(|compositor, cx| run_command(compositor, cx, MappableCommand::review_cycle)),
         ),
         context_menu::Entry::new(
             if hidden {
