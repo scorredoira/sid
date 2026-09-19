@@ -152,6 +152,15 @@ impl Piece<'_> {
             Piece::Whole(text) | Piece::Text(text) => text,
         }
     }
+
+    /// Whitespace between tags: the indentation the formatter makes, not content.
+    fn is_blank(&self) -> bool {
+        matches!(self, Piece::Text(text) if text.trim().is_empty())
+    }
+
+    fn is_cdata(&self) -> bool {
+        matches!(self, Piece::Whole(text) if text.starts_with("<![CDATA["))
+    }
 }
 
 fn xml(text: &str, indent: &str, newline: &str) -> Result<Formatted, String> {
@@ -160,8 +169,13 @@ fn xml(text: &str, indent: &str, newline: &str) -> Result<Formatted, String> {
     struct Element<'a> {
         name: &'a str,
         start: usize,
-        preserve: bool,
+        /// Carries `xml:space="preserve"`.
+        space: bool,
+        /// Holds text that is not whitespace: a text leaf, or mixed content.
         text: bool,
+        /// Holds whitespace with no line break in it: spaces, not indentation.
+        spaces: bool,
+        /// Holds child elements, comments or declarations.
         markup: bool,
     }
     let mut open: Vec<Element<'_>> = Vec::new();
@@ -175,16 +189,20 @@ fn xml(text: &str, indent: &str, newline: &str) -> Result<Formatted, String> {
                 open.push(Element {
                     name,
                     start: index,
-                    preserve: preserves_xml_space(text),
+                    space: preserves_xml_space(text),
                     text: false,
+                    spaces: false,
                     markup: false,
                 });
             }
             Piece::Close { name, .. } => match open.pop() {
                 Some(element) if element.name == *name => {
-                    let kept = if preserves_xml_space(pieces[element.start].text()) {
+                    // Text is content wherever it is. Spaces with no line break are
+                    // content in a leaf, and indentation where there are child elements
+                    // to indent: a one-line `<root> <a/> <b/> </root>` is reflowed.
+                    let kept = if element.space {
                         Some(Kept::XmlSpace)
-                    } else if element.preserve || (element.text && !element.markup) {
+                    } else if element.text || (element.spaces && !element.markup) {
                         Some(Kept::CharacterData)
                     } else {
                         None
@@ -207,10 +225,11 @@ fn xml(text: &str, indent: &str, newline: &str) -> Result<Formatted, String> {
             },
             Piece::Text(text) => match open.last_mut() {
                 Some(element) => {
-                    element.text = true;
-                    // Text and spaces separating inline elements are character data.
-                    // Only line breaks with indentation between structural tags reflow.
-                    element.preserve |= !text.trim().is_empty() || !text.contains(['\n', '\r']);
+                    if !text.trim().is_empty() {
+                        element.text = true;
+                    } else if !text.contains(['\n', '\r']) {
+                        element.spaces = true;
+                    }
                 }
                 // Reflowing would drop it: nothing outside the root is kept.
                 None if !text.trim().is_empty() => {
@@ -220,10 +239,11 @@ fn xml(text: &str, indent: &str, newline: &str) -> Result<Formatted, String> {
                 }
                 None => {}
             },
-            Piece::Whole(text) => {
+            // CDATA is character data: it is content like text, not markup.
+            Piece::Whole(_) if piece.is_cdata() => {}
+            Piece::Whole(_) => {
                 if let Some(element) = open.last_mut() {
                     element.markup = true;
-                    element.preserve |= text.starts_with("<![CDATA[");
                 }
             }
         }
@@ -239,6 +259,9 @@ fn xml(text: &str, indent: &str, newline: &str) -> Result<Formatted, String> {
     let mut kept = Vec::new();
     let mut depth = 0usize;
     let mut index = 0;
+    // Every line break inside a piece - a preserved subtree, a comment, an attribute list
+    // over several lines - is the document's line ending, so a CRLF file formatted with
+    // `\n` does not come out mixed.
     let line = |out: &mut String, depth: usize, content: &str| {
         if !out.is_empty() {
             out.push_str(newline);
@@ -246,7 +269,8 @@ fn xml(text: &str, indent: &str, newline: &str) -> Result<Formatted, String> {
         for _ in 0..depth {
             out.push_str(indent);
         }
-        out.push_str(content);
+        let content = content.replace("\r\n", "\n").replace('\r', "\n");
+        out.push_str(&content.replace('\n', newline));
     };
     while index < pieces.len() {
         if let Some((end, why)) = preserved[index] {
@@ -260,28 +284,31 @@ fn xml(text: &str, indent: &str, newline: &str) -> Result<Formatted, String> {
         }
         match &pieces[index] {
             Piece::Open { name, text } => {
-                // An element holding only text stays on one line: `<name>text</name>`.
-                match (pieces.get(index + 1), pieces.get(index + 2)) {
-                    (
-                        Some(Piece::Close {
-                            name: closing,
-                            text: close,
-                        }),
-                        _,
-                    ) if closing == name => {
-                        line(&mut out, depth, &format!("{text}{close}"));
-                        index += 2;
-                        continue;
+                // An element holding nothing, or one CDATA on one line, stays on one line:
+                // `<name></name>`, `<name><![CDATA[..]]></name>`. Whitespace with a line
+                // break between its tags is indentation, and goes.
+                let mut next = index + 1;
+                while pieces.get(next).is_some_and(Piece::is_blank) {
+                    next += 1;
+                }
+                let mut inner = "";
+                if let Some(cdata) = pieces.get(next).filter(|piece| piece.is_cdata()) {
+                    let cdata = cdata.text();
+                    if !cdata.contains(['\n', '\r']) {
+                        inner = cdata;
+                        next += 1;
+                        while pieces.get(next).is_some_and(Piece::is_blank) {
+                            next += 1;
+                        }
                     }
-                    (
-                        Some(Piece::Text(inner)),
-                        Some(Piece::Close {
-                            name: closing,
-                            text: close,
-                        }),
-                    ) if closing == name => {
-                        line(&mut out, depth, &format!("{text}{}{close}", inner));
-                        index += 3;
+                }
+                match pieces.get(next) {
+                    Some(Piece::Close {
+                        name: closing,
+                        text: close,
+                    }) if closing == name => {
+                        line(&mut out, depth, &format!("{text}{inner}{close}"));
+                        index = next + 1;
                         continue;
                     }
                     _ => {}
@@ -402,38 +429,6 @@ mod tests {
     }
 
     #[test]
-    fn json_numbers_beyond_f64_are_still_json() {
-        assert_eq!(json("[1e400]", "  ", "\n").unwrap(), "[\n  1e400\n]\n");
-    }
-
-    #[test]
-    fn what_was_kept_is_named() {
-        let formatted = xml(
-            "<root><a xml:space=\"preserve\"> x </a><b>text</b><c> y </c><d/></root>",
-            "  ",
-            "\n",
-        )
-        .unwrap();
-        assert_eq!(
-            formatted.kept_message().unwrap(),
-            "3 elements kept as written: xml:space=\"preserve\" and character data"
-        );
-        let one = xml("<root><b>text</b></root>", "  ", "\n").unwrap();
-        assert_eq!(
-            one.kept_message().unwrap(),
-            "1 element kept as written: character data"
-        );
-        assert_eq!(xml("<root><a/></root>", "  ", "\n").unwrap().kept, vec![]);
-        assert_eq!(
-            format("json", "{}", "  ", "\n")
-                .unwrap()
-                .unwrap()
-                .kept_message(),
-            None
-        );
-    }
-
-    #[test]
     fn json_is_indented_keeping_order_numbers_and_escapes() {
         let text = r#"{"b":1.50,"a":[1, 2,{}],"s":"x\"y, {z}: ","e":[],
             "n":{"deep":  null}}"#;
@@ -450,6 +445,11 @@ mod tests {
         assert!(json("{\"a\": 1,}", "  ", "\n").is_err());
         assert!(json("{\"a\": 1}\n{\"b\": 2}\n", "  ", "\n").is_err());
         assert!(json("// note\n{}", "  ", "\n").is_err());
+    }
+
+    #[test]
+    fn json_numbers_beyond_f64_are_still_json() {
+        assert_eq!(json("[1e400]", "  ", "\n").unwrap(), "[\n  1e400\n]\n");
     }
 
     #[test]
@@ -503,11 +503,12 @@ mod tests {
             "<root xml:space = 'preserve'><a/> \n <b/></root>",
             "<root><name>  Golf </name></root>",
             "<root><space> \t </space></root>",
+            "<root><raw> <![CDATA[ x ]]> </raw></root>",
             "<p>Hello <b>world</b> !</p>",
             "<p><b>Hello</b> <i>world</i>!</p>",
-            "<p><![CDATA[  text  ]]><b>more</b></p>",
+            "<p><![CDATA[  text  ]]> and <b>more</b></p>",
         ] {
-            let formatted = xml_text(text).unwrap();
+            let formatted = xml(text, "  ", "\n").unwrap();
             // Compare the literal character data, including whitespace-only leaves.
             let expected = if text.starts_with("<root><") {
                 text.replacen("<root>", "<root>\n  ", 1)
@@ -515,8 +516,89 @@ mod tests {
             } else {
                 format!("{text}\n")
             };
-            assert_eq!(formatted, expected);
-            assert_eq!(xml_text(&formatted).unwrap(), formatted);
+            assert_eq!(formatted.text, expected);
+            assert_eq!(formatted.kept.len(), 1, "{text}");
+            assert_eq!(xml_text(&formatted.text).unwrap(), formatted.text);
         }
+    }
+
+    #[test]
+    fn what_was_kept_is_named() {
+        let formatted = xml(
+            "<root><a xml:space=\"preserve\"> x </a><b>text</b><c> y </c><d/></root>",
+            "  ",
+            "\n",
+        )
+        .unwrap();
+        assert_eq!(
+            formatted.kept_message().unwrap(),
+            "3 elements kept as written: xml:space=\"preserve\" and character data"
+        );
+        let one = xml("<root><b>text</b></root>", "  ", "\n").unwrap();
+        assert_eq!(
+            one.kept_message().unwrap(),
+            "1 element kept as written: character data"
+        );
+        assert_eq!(xml("<root><a/></root>", "  ", "\n").unwrap().kept, vec![]);
+        assert_eq!(
+            format("json", "{}", "  ", "\n")
+                .unwrap()
+                .unwrap()
+                .kept_message(),
+            None
+        );
+    }
+
+    #[test]
+    fn whitespace_with_a_line_break_in_a_leaf_is_indentation() {
+        assert_eq!(
+            xml_text("<root>\n  <a>\n    </a>\n  <b>\n</b></root>").unwrap(),
+            "<root>\n  <a></a>\n  <b></b>\n</root>\n"
+        );
+    }
+
+    #[test]
+    fn spaces_between_child_elements_are_reflowed() {
+        assert_eq!(
+            xml_text("<root> <a/> <b>1</b> </root>").unwrap(),
+            "<root>\n  <a/>\n  <b>1</b>\n</root>\n"
+        );
+        // A leaf's spaces are its content, and text among the children makes them so.
+        assert_eq!(xml_text("<root> </root>").unwrap(), "<root> </root>\n");
+        assert_eq!(
+            xml_text("<root> <a/> x </root>").unwrap(),
+            "<root> <a/> x </root>\n"
+        );
+    }
+
+    #[test]
+    fn cdata_alone_does_not_keep_the_parent_as_written() {
+        // A CDATA on a line of its own among elements: indented with them.
+        assert_eq!(
+            xml_text("<root>\n<![CDATA[x]]>\n<a/>\n<b/>\n</root>").unwrap(),
+            "<root>\n  <![CDATA[x]]>\n  <a/>\n  <b/>\n</root>\n"
+        );
+        // A leaf holding one CDATA sits on one line, or around it when it spans lines.
+        assert_eq!(
+            xml_text("<root>\n  <raw>\n    <![CDATA[x]]>\n  </raw>\n</root>").unwrap(),
+            "<root>\n  <raw><![CDATA[x]]></raw>\n</root>\n"
+        );
+        assert_eq!(
+            xml_text("<root><script><![CDATA[\n  code\n]]></script></root>").unwrap(),
+            "<root>\n  <script>\n    <![CDATA[\n  code\n]]>\n  </script>\n</root>\n"
+        );
+    }
+
+    #[test]
+    fn line_breaks_inside_kept_pieces_follow_the_chosen_newline() {
+        let text = "<root>\r\n<p>Hello\r\n<b>world</b></p>\r\n<!-- a\r\nnote -->\r\n<a\r\n  b=\"1\"/>\r\n</root>\r\n";
+        assert_eq!(
+            xml_text(text).unwrap(),
+            "<root>\n  <p>Hello\n<b>world</b></p>\n  <!-- a\nnote -->\n  <a\n  b=\"1\"/>\n</root>\n"
+        );
+        assert_eq!(
+            xml("<p>a\n<b/></p>", "  ", "\r\n").unwrap().text,
+            "<p>a\r\n<b/></p>\r\n"
+        );
     }
 }
