@@ -99,17 +99,25 @@ keys only when `Ctrl-e` or `Ctrl-r` asks for them, until `Esc`, `Enter`, or a
 click on a file or on the text. The wheel scrolls, and dragging the line between
 the tree and the editor resizes it: the width is remembered.
 
-`Ctrl-Alt-o` opens an **outline** under the tree: the functions and methods of
-the file you are editing. A running language server says what the file defines,
-every kind of thing it knows; without one the syntax tree does, so it works for
-every language sid highlights with nothing installed. Either way it follows what
-you type. A click, or `Enter`, goes to the definition. The one your cursor is
-inside is bold, and the outline follows the cursor as the tree follows the file.
-The rule between the two says `by position` or `by name`: a click on it turns
-the order over, and dragging the rest of it resizes the panes. `Alt-↑` and
-`Alt-↓` move the focus between the tree and the outline, and typing walks the
-outline by name as it walks the tree. `Ctrl-Alt-o` again puts it away; what
-you chose is remembered.
+`Ctrl-Alt-o` takes you to an **outline** under the tree: the functions and
+methods of the file you are editing. A running language server says what the
+file defines, every kind of thing it knows; without one the syntax tree does, so
+it works for every language sid highlights with nothing installed, and the
+outline moves over to the server the moment it comes up. Either way it follows
+what you type, once you pause. A click, or `Enter`, goes to the definition. The
+one your cursor is inside is bold, and the outline follows the cursor as the
+tree follows the file; the status line names it too, `Shape › area`, outermost
+first, whether the outline is on screen or not (it is the `current-symbol`
+element, for a configuration that lays out its own status line). The rule
+between the two says `by position` or `by name`: a click on it turns the order
+over, and dragging the rest of it resizes the panes. `Alt-↑` and `Alt-↓` move
+the focus between the tree and the outline, typing walks the outline by name as
+it walks the tree, and `/` narrows it to the definitions whose name contains
+what you type, `Esc` bringing them all back. By position, a definition with
+others inside it folds as a directory does: `←` closes it, `→` opens it,
+`Shift-←` and `Shift-→` fold or unfold them all. `Ctrl-Alt-o` pressed while the
+outline has the keys puts it away and gives the keys back to the code; what you
+chose is remembered.
 
 A right click on the outline offers the rest: **List every definition** adds the
 types, classes, constants and the rest of what the file holds to the functions
@@ -123,7 +131,10 @@ first time, and both choices are remembered like the order.
 The tree reads the disk off to the side, never while drawing, and it notices
 what happens there: a file a tool or git creates appears on its own within a
 couple of seconds, with your folds and your place kept. `F5` reads everything
-on screen again at once.
+on screen again at once, wherever the focus is. Inside a git repository each
+row says what git says of it, dimmed at its tail: `M` modified, `A` added,
+`D` deleted, `R` renamed, and a `•` on a directory with a change somewhere
+inside.
 
 ## Search and replace across the project
 
@@ -170,8 +181,12 @@ itself to edit it, where the gutter marks the lines that changed.
 
 `s` stages the file under the cursor, `u` takes it out of the index, and `d`
 (or `Delete`) throws its working changes away after asking — an untracked file
-is deleted, since git has nothing to get it back from. A file that is open is
-read again from disk afterwards. The right button offers the same on the row it
+is deleted, since git has nothing to get it back from, and the question says
+when unsaved edits to the file in the editor would go with it. A file that is
+open is read again from disk afterwards. One hunk at a time works too, from the
+diff on screen or from the list: `Ctrl-Alt-s` stages the hunk under the cursor,
+`Ctrl-Alt-u` takes it out of the index, and `Ctrl-Alt-x` throws it away after
+asking; the right button offers the three on a line of the diff. The right button offers the same on the row it
 lands on. The list is asked of git every couple of seconds while the tab is on
 screen, and it stays where you scrolled it.
 
@@ -179,18 +194,30 @@ screen, and it stays where you scrolled it.
 
 ## The history, and each commit's diff
 
-The **Commits** tab lists the history. A click on a commit shows its whole
-diff in the editor; `Enter` or a double click lists the files it touched, the
-diff then following whatever the cursor is on: a directory, one file. Another
-double click on the commit puts that list away, as `F9` does. `Esc` goes back. `/` opens a filter on the top row: the history narrows to the
-commits whose hash starts with what you type (`45f740db8`) or whose subject or
-author contains it, looking through the whole history, not only what is on
-screen — `Esc` brings it all back. History sits above the changed files in one column; drag the divider
-to resize either pane, or its outer edge to adjust the column width.
+The **Commits** tab lists the history, with the whole width to itself until a
+commit is opened. `Enter` or a double click opens one: the files it touched
+appear under the history, and beside them the code column with the commit's
+message and the diff of every file, each file's diff set apart from the next
+with room between them. The diff then follows whatever the cursor is on in the
+files: a directory, or one file, shown on its own without the message. Another
+double click on the commit puts the files and the code away, as `F9` does, and
+`Esc` closes the commit and leaves the history alone again; `F7` hides or shows
+the code in between. `/` opens a filter on the top row: the history narrows to
+the commits whose hash starts with what you type (`45f740db8`) or whose subject
+or author contains it, looking through the whole history, not only what is on
+screen — `Esc` brings it all back. History sits above the changed files in one
+column; drag the divider to resize either pane, or its outer edge to adjust the
+column width.
 
 Diffs show filenames and highlighted code with old/new line numbers. `F4` toggles
-the full historical file around the changes. Right-click for these controls,
-or use `F6` / `F7` to show or hide commits / code.
+the full historical file around the changes. The right button offers these
+controls too.
+
+`F6` walks the round of the places work is looked at from: from the code to the
+tab the sidebar shows (the files, when it is closed), then the files, the
+changes, the commits, and back to the code, with the sidebar left where it is.
+`Shift-F6` walks it the other way. Outside a git repository the round is the
+files and the code.
 
 ![The history in the sidebar, the diff of the selected commit on the right](fork/screenshots/commits.png)
 
@@ -262,8 +289,9 @@ the language server knows about it, and on a problem shows the problem first;
 moving away closes it.
 
 Opening the editor on a project — `sid`, or `sid .` — reopens what it had
-open: the tabs in their order, the splits as they were, each with its cursor
-where it was, and the one you were on in front. Naming a file opens that file
+open: the tabs in their order, the splits as they were and as wide as they
+were, each with its cursor where it was and scrolled where it was, and the one
+you were on in front. Naming a file opens that file
 alone, and the settings screen turns it off altogether. Splits resize by dragging the line between two
 side by side, or the status line between two stacked. In the pickers a click
 previews a row and a double click opens it; the wheel over the list walks it,
@@ -281,8 +309,9 @@ it again, and moves as fast as a small one.
 **sid opens where you type.** It starts in insert mode and stays there: moving
 to another file or another split no longer drops you into normal mode, and
 `Escape` closes what is open rather than changing the mode you are in. Helix's
-modal editing is all still here — the first line of the settings screen
-(`Ctrl-,`) switches back to it, and so does `default-mode = "normal"` under
+modal editing is all still here — `Ctrl-Alt-m`, or `Alt-Enter`, leaves the
+typing for normal mode, the first line of the settings screen (`Ctrl-,`)
+switches sid to it for good, and so does `default-mode = "normal"` under
 `[editor]` — but nothing takes you to it without asking.
 
 So the keys are the ones you already know:
@@ -309,18 +338,22 @@ So the keys are the ones you already know:
 | `Ctrl-s` / `Ctrl-Shift-s` | Save / save under a name |
 | `Ctrl-p` | Open a file by name |
 | `F1` / `Ctrl-Shift-p` | The command palette: every command, searchable by name or by what it does (`diff`, `git`), with its keys |
-| `Shift-F1` | Searchable keyboard shortcut reference (including sidebar controls) |
+| `Shift-F1` | Every shortcut, searchable, and where each is changed |
+| `Ctrl-Alt-m` / `Alt-Enter` | Leave the typing for Helix's normal mode |
 | `Shift-F10` | What can be done to what the cursor is on — the menu the right button opens, for terminals that keep the right button for themselves |
 | `F4` | Commit diff: full file context / changed sections |
 | `Ctrl-Alt-d` | A diff side by side / one side above the other |
-| `F6` / `F7` | Show or hide the commits / code panel |
+| `F6` / `Shift-F6` | The round: the files, the changes, the commits, the code — and back |
+| `F7` / `F9` | Show or hide the code column / a commit's files |
+| `F5` | Read the sidebar again |
+| `Ctrl-Alt-s` / `Ctrl-Alt-u` / `Ctrl-Alt-x` | Stage / unstage / discard the hunk under the cursor of an uncommitted diff |
 | `Ctrl-Alt-b` / `Ctrl-Alt-l` | Who changed this line / this file's history |
 | `Ctrl-f` / `F3` / `Shift-F3` | Search in this file / next match / previous |
 | `Ctrl-Shift-f`, or `Ctrl-f` twice | Search and replace across the project |
 | `Ctrl-g` | Go to a line |
 | `Ctrl-o` / `Ctrl-t` | Go to a symbol in the file / in the project |
 | `Ctrl-b` / `Ctrl-e` / `Ctrl-r` | The sidebar: show or hide / focus / reveal this file |
-| `Ctrl-Alt-o` | The outline of this file's functions and methods, under the tree or beside it |
+| `Ctrl-Alt-o` | Go to the outline of this file's definitions, under the tree or beside it; from inside it, put it away |
 | `Ctrl-Alt-n` / `Ctrl-Alt-r` / `Shift-Delete` | The file tree's selection: create beside it / rename it / delete it, wherever the focus is |
 | `Shift-Alt-r` | Show the file tree's selection in the system's file manager — Finder, Explorer, or the desktop's own |
 | `Shift-F11` | Collapse every directory of the file tree, wherever the focus is |
@@ -331,7 +364,7 @@ So the keys are the ones you already know:
 | `F2` | Rename the symbol |
 | `F8` | Next diagnostic |
 | `Alt-z` | Wrap long lines, or stop |
-| `Shift-Alt-f` | Format the file — JSON and XML with nothing installed |
+| `Shift-Alt-f` | Format the file — JSON and XML with nothing installed; it says when nothing needed changing |
 | `Ctrl-Shift-b` | Show or hide the Markdown preview beside the file |
 | `Ctrl-Shift-m` | The Markdown preview on its own, filling the screen |
 | `Ctrl-q` | Quit, asking about anything unsaved |
@@ -404,19 +437,40 @@ theme brought down to its 256 colours.
 ## Settings on the screen
 
 `Ctrl-,` opens the handful of settings a newcomer reaches for, each showing what
-it is set to now: wrapping, saving, line numbers, tabs, the mouse. Up and down
-walk them, `Space` or a click changes the one in focus, and the change applies at
-once and is written to `~/.config/sid/config.toml` as it is made — only the line
-it touches, so the rest of the file, comments included, stays as you wrote it.
+it is set to now and the keys that flip it: wrapping, saving, line numbers, tabs,
+the mouse. Up and down walk them, typing narrows the list, `Space` or a click
+changes the one in focus, and the change applies at once and is written to
+`~/.config/sid/config.toml` as it is made — only the line it touches, so the
+rest of the file, comments included, stays as you wrote it. A setting is a
+command too: flipped from the palette or by its key (`Alt-z` for wrapping), it
+is written the same way.
 
 ![The settings on screen, over the file being edited](fork/screenshots/settings.png)
 
 ## Find a shortcut
 
 `F1` opens the command palette: every command, searchable by its name or by what it
-does — `diff` or `git` find every git command — with the keys bound to it. `Shift-F1` opens a centered reference of the shortcuts over the editor. Type to
-search your configured shortcuts, use `Tab` to filter by mode or sidebar, and `Esc`
-to close it.
+does — `diff` or `git` find every git command — with the keys bound to it.
+
+`Shift-F1` opens every shortcut over the editor, and it is where they are
+changed. Type to search by the action or by what it does, or press a shortcut
+to see what it runs; `Tab` and `Shift-Tab` walk the lists: all of them, those
+that work while typing, those of modal editing, the actions with no key, and
+those you gave a key yourself. A column says whose each key is, sid's or yours,
+and a key this terminal never sends is shown dimmed and says so instead of
+disappearing.
+
+`Enter`, or a double click, changes the keys of the action in focus: press the
+new ones and `Enter` again. A bare letter, `Enter`, `Tab`, `Backspace` or
+`Delete` is refused for an action that works while typing, since the text needs
+it. A key that another action already has is said before anything is written,
+in the same box: take it anyway, or swap, giving the other action the keys this
+one had. `Shift-F10`, the `Menu` key or the right button open the rest on the
+row: take its keys away, give it back to sid's own, show what else has these
+keys, give every shortcut back, or edit `config.toml` by hand for what the
+screen cannot say. `Ctrl-z` undoes the last change made there. Everything goes
+to `~/.config/sid/config.toml`, only the line it touches, and takes effect at
+once.
 
 Not every terminal sends every key. Terminal.app, the Linux console and most
 terminals reached over SSH send no `Cmd`, and send `Ctrl-Shift` with a letter as
