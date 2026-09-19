@@ -1497,7 +1497,7 @@ impl Application {
         }
 
         if let Some(layout) = &session.layout {
-            Self::restore_pane(editor, layout, None);
+            Self::restore_pane(editor, layout);
         }
 
         if let Some(focused) = &session.focused {
@@ -1516,19 +1516,24 @@ impl Application {
         true
     }
 
-    /// Puts a pane on screen: a view into the focused one (split off it when `split` says
-    /// so). Create a container's siblings before expanding their nested splits.
-    fn restore_pane(editor: &mut Editor, pane: &crate::session::Pane, split: Option<Layout>) {
+    /// Puts a pane into the focused view: a file straight in, a split by making its
+    /// siblings first - each opened on its first file - and expanding their nested splits
+    /// after, so a container is complete before anything is split off inside it.
+    fn restore_pane(editor: &mut Editor, pane: &crate::session::Pane) {
         use crate::session::{Pane, Split};
         use helix_view::editor::Action;
 
+        /// The first file of a pane that is still there, loaded but not yet shown.
         fn first_document(editor: &mut Editor, pane: &Pane) -> Option<helix_view::DocumentId> {
             match pane {
                 Pane::View { file, .. } if file.is_file() => editor
                     .open(file, Action::Load)
                     .map_err(|err| log::info!("Not showing {}: {err}", file.display()))
                     .ok(),
-                Pane::View { .. } => None,
+                Pane::View { file, .. } => {
+                    log::info!("Not showing {}: it is no longer there", file.display());
+                    None
+                }
                 Pane::Split { panes, .. } => {
                     panes.iter().find_map(|pane| first_document(editor, pane))
                 }
@@ -1546,48 +1551,48 @@ impl Application {
                     let Some(doc) = first_document(editor, pane) else {
                         continue;
                     };
-                    let how = if siblings.is_empty() {
-                        split
+                    let action = if siblings.is_empty() {
+                        Action::Replace
                     } else {
-                        Some(layout)
-                    };
-                    let action = match how {
-                        None => Action::Replace,
-                        Some(Layout::Vertical) => Action::VerticalSplit,
-                        Some(Layout::Horizontal) => Action::HorizontalSplit,
+                        match layout {
+                            Layout::Vertical => Action::VerticalSplit,
+                            Layout::Horizontal => Action::HorizontalSplit,
+                        }
                     };
                     editor.switch(doc, action);
                     siblings.push((editor.tree.focus, pane));
                 }
                 for (view, pane) in siblings {
                     editor.focus(view);
-                    Self::restore_pane(editor, pane, None);
+                    match pane {
+                        // Its file is the one the view was opened on.
+                        Pane::View { line, column, .. } => {
+                            Self::place_cursor(editor, *line, *column);
+                        }
+                        Pane::Split { .. } => Self::restore_pane(editor, pane),
+                    }
                 }
             }
-            Pane::View { file, line, column } => {
-                if !file.is_file() {
-                    log::info!("Not showing {}: it is no longer there", file.display());
+            Pane::View { line, column, .. } => {
+                let Some(doc) = first_document(editor, pane) else {
                     return;
-                }
-                let action = match split {
-                    None => Action::Replace,
-                    Some(Layout::Vertical) => Action::VerticalSplit,
-                    Some(Layout::Horizontal) => Action::HorizontalSplit,
                 };
-                if let Err(err) = editor.open(file, action) {
-                    log::info!("Not showing {}: {err}", file.display());
-                    return;
-                }
-
-                let (view, doc) = current!(editor);
-                let text = doc.text().slice(..);
-                let line = (*line).min(text.len_lines().saturating_sub(1));
-                let end = helix_core::line_ending::line_end_char_index(&text, line);
-                let pos = (text.line_to_char(line) + column).min(end);
-                doc.set_selection(view.id, Selection::point(pos));
-                align_view(doc, view, Align::Center);
+                editor.switch(doc, Action::Replace);
+                Self::place_cursor(editor, *line, *column);
             }
         }
+    }
+
+    /// Puts the cursor where the session left it in the focused view, clipped to the text
+    /// the file has now, and centres it.
+    fn place_cursor(editor: &mut Editor, line: usize, column: usize) {
+        let (view, doc) = current!(editor);
+        let text = doc.text().slice(..);
+        let line = line.min(text.len_lines().saturating_sub(1));
+        let end = helix_core::line_ending::line_end_char_index(&text, line);
+        let pos = (text.line_to_char(line) + column).min(end);
+        doc.set_selection(view.id, Selection::point(pos));
+        align_view(doc, view, Align::Center);
     }
 
     fn remember_session(&mut self) {
@@ -1901,7 +1906,7 @@ mod session_restore_tests {
                 Split::Vertical,
                 vec![missing.clone(), expected.clone(), missing.clone()],
             );
-            Application::restore_pane(&mut app.editor, &with_missing, None);
+            Application::restore_pane(&mut app.editor, &with_missing);
             let actual = app.session_pane(&app.editor.tree.panes()).unwrap();
             assert_eq!(toml::to_string(&actual)?, toml::to_string(&expected)?);
             assert!(app.close().await.is_empty());
