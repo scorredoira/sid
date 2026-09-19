@@ -866,9 +866,39 @@ impl Tree {
                     .iter()
                     .map(|child| self.pane_of(*child))
                     .collect();
-                Pane::Split(container.layout, panes)
+                Pane::Split {
+                    layout: container.layout,
+                    weights: container.weights.clone(),
+                    panes,
+                }
             }
         }
+    }
+
+    /// Gives the container holding exactly `views`, in that order, the shares `weights`,
+    /// one per view: how a session puts a resized split back. Nothing changes, and false
+    /// comes back, when the views are not one container's children or the counts differ.
+    pub fn set_weights(&mut self, views: &[ViewId], weights: &[u32]) -> bool {
+        let Some(first) = views.first() else {
+            return false;
+        };
+        if weights.len() != views.len() || weights.contains(&0) {
+            return false;
+        }
+        let parent = self.nodes[*first].parent;
+        let Some(Node {
+            content: Content::Container(container),
+            ..
+        }) = self.nodes.get_mut(parent)
+        else {
+            return false;
+        };
+        if container.children != views {
+            return false;
+        }
+        container.weights = weights.to_vec();
+        self.recalculate();
+        true
     }
 }
 
@@ -876,7 +906,12 @@ impl Tree {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Pane {
     View(ViewId),
-    Split(Layout, Vec<Pane>),
+    Split {
+        layout: Layout,
+        /// Each pane's share of the split, in the order of `panes`.
+        weights: Vec<u32>,
+        panes: Vec<Pane>,
+    },
 }
 
 #[derive(Debug)]
@@ -1269,17 +1304,30 @@ mod test {
 
         assert_eq!(
             panes,
-            Pane::Split(
-                Layout::Vertical,
-                vec![
+            Pane::Split {
+                layout: Layout::Vertical,
+                weights: vec![DEFAULT_WEIGHT, DEFAULT_WEIGHT],
+                panes: vec![
                     Pane::View(first),
-                    Pane::Split(
-                        Layout::Horizontal,
-                        vec![Pane::View(right), Pane::View(below)]
-                    ),
-                ]
-            )
+                    Pane::Split {
+                        layout: Layout::Horizontal,
+                        weights: vec![DEFAULT_WEIGHT, DEFAULT_WEIGHT],
+                        panes: vec![Pane::View(right), Pane::View(below)],
+                    },
+                ],
+            }
         );
+
+        // The shares a session wrote down go back on, in the panes' order: the two
+        // stacked views three to one, over 24 rows.
+        assert!(tree.set_weights(&[right, below], &[3, 1]));
+        assert_eq!(heights(&tree), vec![24, 18, 6]);
+        // Not for views that are not one container's children, not for a count that
+        // is not theirs, and not for a share of nothing.
+        assert!(!tree.set_weights(&[first, right], &[1, 1]));
+        assert!(!tree.set_weights(&[right, below], &[1]));
+        assert!(!tree.set_weights(&[right, below], &[0, 1]));
+        assert_eq!(heights(&tree), vec![24, 18, 6]);
     }
 
     #[test]

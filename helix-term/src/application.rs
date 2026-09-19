@@ -1541,7 +1541,11 @@ impl Application {
         }
 
         match pane {
-            Pane::Split { split: own, panes } => {
+            Pane::Split {
+                split: own,
+                sizes,
+                panes,
+            } => {
                 let layout = match own {
                     Split::Vertical => Layout::Vertical,
                     Split::Horizontal => Layout::Horizontal,
@@ -1562,37 +1566,64 @@ impl Application {
                     editor.switch(doc, action);
                     siblings.push((editor.tree.focus, pane));
                 }
+                // The sizes go on before the nested splits, whose containers would take
+                // the views' places among the siblings.
+                let views: Vec<_> = siblings.iter().map(|(view, _)| *view).collect();
+                if views.len() == panes.len() {
+                    editor.tree.set_weights(&views, sizes);
+                }
                 for (view, pane) in siblings {
                     editor.focus(view);
                     match pane {
                         // Its file is the one the view was opened on.
-                        Pane::View { line, column, .. } => {
-                            Self::place_cursor(editor, *line, *column);
+                        Pane::View {
+                            line, column, top, ..
+                        } => {
+                            Self::place_cursor(editor, *line, *column, *top);
                         }
                         Pane::Split { .. } => Self::restore_pane(editor, pane),
                     }
                 }
             }
-            Pane::View { line, column, .. } => {
+            Pane::View {
+                line, column, top, ..
+            } => {
                 let Some(doc) = first_document(editor, pane) else {
                     return;
                 };
                 editor.switch(doc, Action::Replace);
-                Self::place_cursor(editor, *line, *column);
+                Self::place_cursor(editor, *line, *column, *top);
             }
         }
     }
 
     /// Puts the cursor where the session left it in the focused view, clipped to the text
-    /// the file has now, and centres it.
-    fn place_cursor(editor: &mut Editor, line: usize, column: usize) {
+    /// the file has now, and scrolls the view to the line that was at the top; with no
+    /// such line remembered, or one that would leave the cursor off screen, the cursor
+    /// is centred.
+    fn place_cursor(editor: &mut Editor, line: usize, column: usize, top: Option<usize>) {
+        let scrolloff = editor.config().scrolloff;
         let (view, doc) = current!(editor);
         let text = doc.text().slice(..);
-        let line = line.min(text.len_lines().saturating_sub(1));
+        let last = text.len_lines().saturating_sub(1);
+        let line = line.min(last);
         let end = helix_core::line_ending::line_end_char_index(&text, line);
         let pos = (text.line_to_char(line) + column).min(end);
+        let anchor = top
+            .filter(|top| *top <= line)
+            .map(|top| text.line_to_char(top.min(last)));
         doc.set_selection(view.id, Selection::point(pos));
-        align_view(doc, view, Align::Center);
+        match anchor {
+            Some(anchor) => {
+                let mut offset = doc.view_offset(view.id);
+                offset.anchor = anchor;
+                offset.vertical_offset = 0;
+                offset.horizontal_offset = 0;
+                doc.set_view_offset(view.id, offset);
+                view.ensure_cursor_in_view(doc, scrolloff);
+            }
+            None => align_view(doc, view, Align::Center),
+        }
     }
 
     fn remember_session(&mut self) {
@@ -1640,21 +1671,43 @@ impl Application {
                 let cursor = doc.selection(view.id).primary().cursor(text);
                 let line = text.char_to_line(cursor);
                 let column = cursor - text.line_to_char(line);
-                Some(Pane::View { file, line, column })
+                let anchor = doc.view_offset(view.id).anchor.min(text.len_chars());
+                let top = Some(text.char_to_line(anchor));
+                Some(Pane::View {
+                    file,
+                    line,
+                    column,
+                    top,
+                })
             }
-            helix_view::tree::Pane::Split(layout, panes) => {
+            helix_view::tree::Pane::Split {
+                layout,
+                weights,
+                panes,
+            } => {
                 let split = match layout {
                     Layout::Vertical => Split::Vertical,
                     Layout::Horizontal => Split::Horizontal,
                 };
-                let mut panes: Vec<_> = panes
-                    .iter()
-                    .filter_map(|pane| self.session_pane(pane))
-                    .collect();
+                let mut kept: Vec<_> = panes.iter().map(|pane| self.session_pane(pane)).collect();
+                // The shares are only worth writing when every pane is written, and when
+                // they are not the even split a session without them reads as.
+                let sizes = if kept.iter().all(Option::is_some)
+                    && weights.iter().any(|weight| Some(weight) != weights.first())
+                {
+                    weights.clone()
+                } else {
+                    Vec::new()
+                };
+                let mut panes: Vec<_> = kept.drain(..).flatten().collect();
                 match panes.len() {
                     0 => None,
                     1 => panes.pop(),
-                    _ => Some(Pane::Split { split, panes }),
+                    _ => Some(Pane::Split {
+                        split,
+                        sizes,
+                        panes,
+                    }),
                 }
             }
         }
@@ -1842,7 +1895,26 @@ mod session_restore_tests {
     use crate::session::{Pane, Split};
 
     fn split(split: Split, panes: Vec<Pane>) -> Pane {
-        Pane::Split { split, panes }
+        Pane::Split {
+            split,
+            sizes: vec![],
+            panes,
+        }
+    }
+
+    fn bare_app() -> anyhow::Result<Application> {
+        let mut config = Config::default();
+        config.editor.restore_session = false;
+        config.editor.sidebar.open = false;
+        config.editor.lsp.enable = false;
+        config.editor.word_completion.enable = false;
+        let loader = syntax::Loader::new(helix_loader::config::default_lang_config().try_into()?)?;
+        Application::new(
+            Args::default(),
+            config,
+            loader,
+            helix_loader::workspace_trust::WorkspaceTrust::fully_trusted(),
+        )
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1856,6 +1928,7 @@ mod session_restore_tests {
                 file,
                 line: 1,
                 column: index,
+                top: Some(0),
             });
         }
         let [a, b, c, d] = <[Pane; 4]>::try_from(leaves).ok().unwrap();
@@ -1863,6 +1936,7 @@ mod session_restore_tests {
             file: dir.path().join("missing"),
             line: 0,
             column: 0,
+            top: None,
         };
         let layouts = [
             split(
@@ -1889,19 +1963,7 @@ mod session_restore_tests {
             split(Split::Horizontal, vec![a.clone(), a]),
         ];
         for expected in layouts {
-            let mut config = Config::default();
-            config.editor.restore_session = false;
-            config.editor.sidebar.open = false;
-            config.editor.lsp.enable = false;
-            config.editor.word_completion.enable = false;
-            let loader =
-                syntax::Loader::new(helix_loader::config::default_lang_config().try_into()?)?;
-            let mut app = Application::new(
-                Args::default(),
-                config,
-                loader,
-                helix_loader::workspace_trust::WorkspaceTrust::fully_trusted(),
-            )?;
+            let mut app = bare_app()?;
             let with_missing = split(
                 Split::Vertical,
                 vec![missing.clone(), expected.clone(), missing.clone()],
@@ -1911,6 +1973,62 @@ mod session_restore_tests {
             assert_eq!(toml::to_string(&actual)?, toml::to_string(&expected)?);
             assert!(app.close().await.is_empty());
         }
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn restoring_a_session_puts_back_the_split_sizes_and_the_scroll() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let long = dir.path().join("long");
+        let lines: String = (0..200).map(|n| format!("line {n}\n")).collect();
+        std::fs::write(&long, &lines)?;
+        let short = dir.path().join("short");
+        std::fs::write(&short, "first\nsecond\n")?;
+
+        // The left pane three times the right one, scrolled so that line 40 is at the top
+        // with the cursor a little below it.
+        let expected = Pane::Split {
+            split: Split::Vertical,
+            sizes: vec![3, 1],
+            panes: vec![
+                Pane::View {
+                    file: long.clone(),
+                    line: 45,
+                    column: 2,
+                    top: Some(40),
+                },
+                Pane::View {
+                    file: short.clone(),
+                    line: 1,
+                    column: 0,
+                    top: Some(0),
+                },
+            ],
+        };
+        let mut app = bare_app()?;
+        Application::restore_pane(&mut app.editor, &expected);
+        let actual = app.session_pane(&app.editor.tree.panes()).unwrap();
+        assert_eq!(toml::to_string(&actual)?, toml::to_string(&expected)?);
+        let (left, right) = {
+            let mut views = app.editor.tree.views();
+            let left = views.next().unwrap().0.area;
+            let right = views.next().unwrap().0.area;
+            (left, right)
+        };
+        assert!(left.width > right.width * 2, "{left:?} {right:?}");
+
+        // A top that would leave the cursor off screen is not taken: the cursor is centred.
+        let off_screen = Pane::View {
+            file: long,
+            line: 190,
+            column: 0,
+            top: Some(10),
+        };
+        Application::restore_pane(&mut app.editor, &off_screen);
+        let (view, doc) = current_ref!(app.editor);
+        let top = doc.text().char_to_line(doc.view_offset(view.id).anchor);
+        assert!(top > 10 && top <= 190, "{top}");
+        assert!(app.close().await.is_empty());
         Ok(())
     }
 }

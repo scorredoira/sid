@@ -24,12 +24,21 @@ pub struct Session {
 pub enum Pane {
     Split {
         split: Split,
+        /// Each pane's share of the split, in the order of `panes`, so a split dragged to
+        /// 70/30 does not come back 50/50; left out when the panes share it evenly, and
+        /// a session written before there were sizes reads as evenly shared.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        sizes: Vec<u32>,
         panes: Vec<Pane>,
     },
     View {
         file: PathBuf,
         line: usize,
         column: usize,
+        /// The first line on screen, so the file comes back scrolled where it was; a
+        /// session written before it was kept centres the cursor instead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        top: Option<usize>,
     },
 }
 
@@ -105,24 +114,29 @@ mod tests {
             focused: Some(PathBuf::from("b.rs")),
             layout: Some(Pane::Split {
                 split: Split::Vertical,
+                sizes: vec![7, 3],
                 panes: vec![
                     Pane::View {
                         file: PathBuf::from("a.rs"),
                         line: 3,
                         column: 1,
+                        top: Some(2),
                     },
                     Pane::Split {
                         split: Split::Horizontal,
+                        sizes: vec![],
                         panes: vec![
                             Pane::View {
                                 file: PathBuf::from("b.rs"),
                                 line: 0,
                                 column: 0,
+                                top: None,
                             },
                             Pane::View {
                                 file: PathBuf::from("a.rs"),
                                 line: 9,
                                 column: 4,
+                                top: Some(9),
                             },
                         ],
                     },
@@ -134,6 +148,29 @@ mod tests {
         let back: Session = toml::from_str(&text).unwrap();
 
         assert!(back == session);
+        // Even shares and an unknown scroll are left out rather than written as zeros.
+        assert_eq!(text.matches("sizes").count(), 1);
+        assert_eq!(text.matches("top").count(), 2);
+    }
+
+    #[test]
+    fn a_session_written_before_sizes_and_scroll_still_reads() {
+        let text = "files = [\"a.rs\"]\n\n[layout]\nsplit = \"vertical\"\n\n\
+            [[layout.panes]]\nfile = \"a.rs\"\nline = 3\ncolumn = 1\n\n\
+            [[layout.panes]]\nfile = \"b.rs\"\nline = 0\ncolumn = 0\n";
+        let session: Session = toml::from_str(text).unwrap();
+        let Some(Pane::Split { sizes, panes, .. }) = session.layout else {
+            panic!("a split");
+        };
+        assert!(sizes.is_empty());
+        assert!(matches!(
+            &panes[0],
+            Pane::View {
+                top: None,
+                line: 3,
+                ..
+            }
+        ));
     }
 
     #[test]
