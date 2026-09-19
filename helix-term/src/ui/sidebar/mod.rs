@@ -118,6 +118,9 @@ pub struct Sidebar {
     pub open: bool,
     pub focused: bool,
     code_hidden: bool,
+    /// Whether the Commits tab stands alone, without the strip of tabs over it: how
+    /// `--commits` opens, until another tab is shown.
+    alone: bool,
     /// Whether the first render has laid the rows out; before it there is no editor to ask.
     built: bool,
     /// The document the sidebar last moved onto, so a buffer switch is noticed at render.
@@ -213,6 +216,7 @@ impl Sidebar {
             open,
             focused: false,
             code_hidden: false,
+            alone: false,
             built: false,
             revealed: None,
             area: Rect::default(),
@@ -592,13 +596,15 @@ impl Sidebar {
         self.revealed = None;
     }
 
-    /// Starts on the Changes tab, focused, as `--changes` asks: called before the first
-    /// render, which builds the tab and asks git for the list. The caller has checked the
-    /// root is in a repository.
-    pub fn open_changes(&mut self) {
+    /// Starts on the Commits tab alone, focused, as `--commits` asks: the tab strip is not
+    /// drawn until another tab is shown, so the history is all there is. Called before
+    /// the first render, which builds the tab and asks git for the log. The caller has
+    /// checked the root is in a repository.
+    pub fn open_commits(&mut self) {
         self.open = true;
         self.focused = true;
-        self.tab = TabKind::Changes;
+        self.tab = TabKind::Commits;
+        self.alone = true;
     }
 
     /// Shows the Files tab, focused, on the file being edited.
@@ -1468,10 +1474,18 @@ impl Sidebar {
             ];
             let mut x = area.x + 1;
             self.tab_columns = [(0, 0); TabKind::ALL.len()];
+            // Opened on the history alone there are no tabs to draw; the row is the
+            // filter's when one is typed. Another tab on screen brings the strip back.
+            self.alone = self.alone && self.tab == TabKind::Commits;
+            let labels = if self.alone {
+                [None, None, None]
+            } else {
+                labels.map(Some)
+            };
             for (index, (kind, label)) in TabKind::ALL.iter().zip(labels).enumerate() {
-                if kind.needs_git() && !self.in_git {
+                let (Some(label), true) = (label, self.in_git || !kind.needs_git()) else {
                     continue;
-                }
+                };
                 let style = if *kind == self.tab {
                     header_style
                 } else {

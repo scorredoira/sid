@@ -144,8 +144,8 @@ impl Application {
         let names_a_file = args.load_tutor || args.files.keys().any(|path| !path.is_dir());
         let sidebar_open = config.load().editor.sidebar.open && !names_a_file;
         let mut sidebar = ui::sidebar::Sidebar::new(helix_loader::find_workspace().0, sidebar_open);
-        if args.changes {
-            sidebar.open_changes();
+        if args.commits {
+            sidebar.open_commits();
         }
         let editor_view = Box::new(ui::EditorView::new(Keymaps::new(keys), sidebar));
         compositor.push(editor_view);

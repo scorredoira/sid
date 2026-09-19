@@ -12,8 +12,9 @@ pub struct Args {
     pub health: bool,
     pub health_arg: Option<String>,
     pub load_tutor: bool,
-    /// Starts on the sidebar's Changes tab, so the editor opens on what git sees changed.
-    pub changes: bool,
+    /// Starts on the sidebar's Commits tab alone, with no tab strip: the history is what
+    /// the editor opens on.
+    pub commits: bool,
     pub fetch_grammars: bool,
     pub build_grammars: bool,
     pub strict: bool,
@@ -54,7 +55,7 @@ impl Args {
                 "--help" => args.display_help = true,
                 "--strict" => args.strict = true,
                 "--tutor" => args.load_tutor = true,
-                "--changes" => args.changes = true,
+                "--commits" => args.commits = true,
                 "--vsplit" => match args.split {
                     Some(_) => anyhow::bail!("can only set a split once of a specific type"),
                     None => args.split = Some(Layout::Vertical),
@@ -74,7 +75,7 @@ impl Args {
                         anyhow::bail!("--grammar must be followed by either 'fetch' or 'build'")
                     }
                 },
-                "-c" | "--config" => match argv.next().as_deref() {
+                "--config" => match argv.next().as_deref() {
                     Some(path) => args.config_file = Some(path.into()),
                     None => anyhow::bail!("--config must specify a path to read"),
                 },
@@ -106,7 +107,7 @@ impl Args {
                             'v' => args.verbosity += 1,
                             'V' => args.display_version = true,
                             'h' => args.display_help = true,
-                            'C' => args.changes = true,
+                            'c' => args.commits = true,
                             _ => anyhow::bail!("unexpected short arg {}", chr),
                         }
                     }

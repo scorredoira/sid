@@ -57,15 +57,16 @@ FLAGS:
     -h, --help                     Print help information
     --strict                       Bail on error for commands that can fail.
     --tutor                        Load the tutorial
-    -C, --changes                  Open on the Changes tab, what git sees changed; outside a git
-                                   repository the editor says so and does not start
+    -c, --commits                  Open on the history alone, the Commits tab without the tab
+                                   strip; outside a git repository the editor says so and does
+                                   not start
     --health [CATEGORY]            Check for potential errors in editor setup
                                    CATEGORY can be a language or one of 'clipboard', 'languages',
                                    'all-languages' or 'all'. 'languages' is filtered according to
                                    user config, 'all-languages' and 'all' are not. If not specified,
                                    the default is the same as 'all', but with languages filtering.
     -g, --grammar {{fetch|build}}    Fetch or builds tree-sitter grammars listed in languages.toml.
-    -c, --config <file>            Specify a file to use for configuration
+    --config <file>                Specify a file to use for configuration
     -v                             Increase logging verbosity each use for up to 3 times
     --log <file>                   Specify a file to use for logging
                                    (default file: {})
@@ -131,9 +132,9 @@ FLAGS:
         return Ok(1);
     }
 
-    // The Changes tab has nothing to show outside a repository, so asked for one the
-    // editor says so here, where the message can be read, instead of opening on the tree.
-    if args.changes {
+    // The history has nothing to show outside a repository, so asked for it the editor
+    // says so here, where the message can be read, instead of opening on the tree.
+    if args.commits {
         let cwd = helix_stdx::env::current_working_dir();
         if !helix_term::ui::sidebar::git::inside_repository(&cwd) {
             eprintln!("{} is not in a git repository", cwd.display());
