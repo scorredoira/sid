@@ -69,9 +69,10 @@ impl helix_event::AsyncHook for AutoSaveHandler {
     fn finish_debounce(&mut self) {
         let save_pending = self.save_pending.clone();
         job::dispatch_blocking(move |editor, _| {
-            if editor.mode() == Mode::Insert {
-                // Avoid saving while in insert mode since this mixes up
-                // the modification indicator and prevents future saves.
+            if editor.mode() == Mode::Insert && editor.config().default_mode != Mode::Insert {
+                // Modal editing waits for the insert session to finish. In sid's
+                // default mode it never finishes; write_all_impl commits the pending
+                // edits to history before saving, keeping saved revisions accurate.
                 save_pending.store(true, atomic::Ordering::Relaxed);
             } else {
                 request_auto_save(editor);

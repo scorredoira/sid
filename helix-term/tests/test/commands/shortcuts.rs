@@ -28,7 +28,12 @@ async fn moving_lines_preserves_the_final_line_ending() -> anyhow::Result<()> {
         );
         test_with_config(
             AppBuilder::new().with_config(config),
-            (before, format!("<esc>{keys}"), after, LineFeedHandling::AsIs),
+            (
+                before,
+                format!("<esc>{keys}"),
+                after,
+                LineFeedHandling::AsIs,
+            ),
         )
         .await?;
     }
@@ -286,6 +291,38 @@ async fn leaving_a_file_saves_it() -> anyhow::Result<()> {
     helpers::run_event_loop_until_idle(&mut app).await;
     helpers::assert_file_has_content(&mut file, &LineFeedHandling::Native.apply("hello\n"))?;
 
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn delayed_save_keeps_working_while_typing_in_insert_mode() -> anyhow::Result<()> {
+    let file = helpers::temp_file_with_contents("")?;
+    let mut config = helpers::test_config();
+    config.editor.default_mode = Mode::Insert;
+    config.editor.auto_save.after_delay.enable = true;
+    config.editor.auto_save.after_delay.timeout = 25;
+    config
+        .keys
+        .insert(Mode::Insert, keymap!({"Insert mode" "C-z" => undo, }));
+    let mut app = AppBuilder::new()
+        .with_config(config)
+        .with_file(file.path(), None)
+        .build()?;
+    let check = |expected: &str, app: &helix_term::application::Application| {
+        assert_eq!(app.editor.mode(), Mode::Insert);
+        assert_eq!(std::fs::read_to_string(file.path()).unwrap(), expected);
+        assert!(!helix_view::doc!(app.editor).is_modified());
+    };
+    test_key_sequences(
+        &mut app,
+        vec![
+            (Some("hello"), Some(&|app| check("hello\n", app))),
+            (Some(" world"), Some(&|app| check("hello world\n", app))),
+            (Some("<C-z>"), Some(&|app| check("hello\n", app))),
+        ],
+        false,
+    )
+    .await?;
     Ok(())
 }
 

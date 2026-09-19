@@ -696,7 +696,10 @@ pub(crate) fn insert_final_newline(doc: &mut Document, view_id: ViewId) {
     let text = doc.text();
     if text.len_chars() > 0 && line_ending::get_line_ending(&text.slice(..)).is_none() {
         let eof = Selection::point(text.len_chars());
-        let insert = Transaction::insert(text, &eof, doc.line_ending.as_str().into());
+        // Saving at EOF must not move the typing caret after the inserted newline:
+        // an automatic save would send the next word to a different line.
+        let insert = Transaction::insert(text, &eof, doc.line_ending.as_str().into())
+            .with_selection(doc.selection(view_id).clone());
         doc.apply(&insert, view_id);
     }
 }
