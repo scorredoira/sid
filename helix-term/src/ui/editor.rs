@@ -2672,7 +2672,7 @@ fn review_menu_entries(
             if commits {
                 "Back to the code"
             } else {
-                "Changes and commits"
+                "Files, changes and commits"
             },
             "F6",
             Box::new(|compositor, cx| run_command(compositor, cx, MappableCommand::review_cycle)),

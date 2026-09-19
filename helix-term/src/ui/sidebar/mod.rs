@@ -416,22 +416,24 @@ impl Sidebar {
         self.in_git
     }
 
-    /// One key for the three things a review is looked at through: the code, the changes
-    /// and the commits, in that round. The sidebar stays on screen the whole way — going
-    /// back to the code never takes the commits away, it only gives the keys back.
+    /// One key for the four places work is looked at from: the files, the changes, the
+    /// commits and the code, in that round. The sidebar stays on screen the whole way —
+    /// coming back to the code never takes a tab away, it only gives the keys back.
+    /// Outside a repository the round is the files and the code, with nothing said about
+    /// the two tabs that have nothing to show.
     pub fn cycle_review(&mut self, editor: &mut Editor) {
-        if !self.git_available(editor) {
-            return;
-        }
+        self.check_git();
         let in_the_code = !self.open || !self.focused;
-        let next = match (in_the_code, self.tab) {
-            // From the code, the changes; from the changes, the commits.
-            (true, _) | (false, TabKind::Files) => Some(TabKind::Changes),
-            (false, TabKind::Changes) => Some(TabKind::Commits),
-            // And from the commits back to the code, with the sidebar left where it is.
-            (false, TabKind::Commits) => None,
+        let next = if in_the_code {
+            Some(TabKind::Files)
+        } else {
+            match self.tab {
+                TabKind::Files => Some(TabKind::Changes),
+                TabKind::Changes => Some(TabKind::Commits),
+                TabKind::Commits => None,
+            }
         };
-        match next {
+        match next.filter(|kind| self.in_git || !kind.needs_git()) {
             Some(kind) => {
                 self.open = true;
                 self.focused = true;

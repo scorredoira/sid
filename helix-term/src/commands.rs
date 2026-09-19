@@ -428,7 +428,7 @@ impl MappableCommand {
         toggle_hidden_files, "Show or hide hidden files in the file tree",
         outline_toggle, "Show or hide the outline of the current file's functions and types, under the file tree",
         outline_sort_toggle, "List the outline by name, or in the order the file defines things",
-        review_cycle, "Move between the code, the changes and the commits",
+        review_cycle, "Walk the files, the changes, the commits and the code",
         review_commits_toggle, "Show or hide the git commits panel",
         review_code_toggle, "Show or hide the code panel while reviewing git commits",
         review_files_toggle, "Show or hide the files panel of a git commit",
