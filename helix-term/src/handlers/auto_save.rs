@@ -119,16 +119,9 @@ fn save_on_leaving(editor: &mut Editor, doc: DocumentId) {
     // Tidied the same way `:w` tidies, so a file is never written two different ways.
     let view = editor.get_synced_view_id(doc);
     let trim_final_newlines = editor.config().trim_final_newlines;
+    let typing = commands::typed::typing(editor);
     let document = doc_mut!(editor, &doc);
-    if document.trim_trailing_whitespace() {
-        commands::typed::trim_trailing_whitespace(document, view);
-    }
-    if trim_final_newlines {
-        commands::typed::trim_final_newlines(document, view);
-    }
-    if document.insert_final_newline() {
-        commands::typed::insert_final_newline(document, view);
-    }
+    commands::typed::tidy_before_save(document, view, trim_final_newlines, typing);
 
     if let Err(err) = editor.save::<std::path::PathBuf>(doc, None, false) {
         editor.set_error(format!("Could not save: {err}"));

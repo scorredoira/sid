@@ -327,6 +327,79 @@ async fn delayed_save_keeps_working_while_typing_in_insert_mode() -> anyhow::Res
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn delayed_save_leaves_the_space_just_typed_when_trimming_whitespace() -> anyhow::Result<()> {
+    let file = helpers::temp_file_with_contents("")?;
+    let mut config = helpers::test_config();
+    config.editor.default_mode = Mode::Insert;
+    config.editor.auto_save.after_delay.enable = true;
+    config.editor.auto_save.after_delay.timeout = 25;
+    config.editor.trim_trailing_whitespace = true;
+    let mut app = AppBuilder::new()
+        .with_config(config)
+        .with_file(file.path(), None)
+        .build()?;
+    let check = |expected: &str, app: &helix_term::application::Application| {
+        assert_eq!(app.editor.mode(), Mode::Insert);
+        assert_eq!(std::fs::read_to_string(file.path()).unwrap(), expected);
+        assert!(!helix_view::doc!(app.editor).is_modified());
+    };
+    test_key_sequences(
+        &mut app,
+        vec![
+            // The caret's own line keeps its trailing space: the next word needs it.
+            (Some("hello "), Some(&|app| check("hello \n", app))),
+            (Some("world"), Some(&|app| check("hello world\n", app))),
+            // A line the caret has left is trimmed on the next save.
+            (
+                Some(" <ret>next"),
+                Some(&|app| check("hello world\nnext\n", app)),
+            ),
+        ],
+        false,
+    )
+    .await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn delayed_save_keeps_the_blank_lines_the_caret_opened_at_the_end() -> anyhow::Result<()> {
+    let file = helpers::temp_file_with_contents("")?;
+    let mut config = helpers::test_config();
+    config.editor.default_mode = Mode::Insert;
+    config.editor.auto_save.after_delay.enable = true;
+    config.editor.auto_save.after_delay.timeout = 25;
+    config.editor.trim_final_newlines = true;
+    let mut app = AppBuilder::new()
+        .with_config(config)
+        .with_file(file.path(), None)
+        .build()?;
+    let check = |expected: &str, app: &helix_term::application::Application| {
+        assert_eq!(app.editor.mode(), Mode::Insert);
+        assert_eq!(std::fs::read_to_string(file.path()).unwrap(), expected);
+        assert!(!helix_view::doc!(app.editor).is_modified());
+    };
+    test_key_sequences(
+        &mut app,
+        vec![
+            // Two Enters at the end and a pause: the caret stays on its new line.
+            (
+                Some("hello<ret><ret>"),
+                Some(&|app| check("hello\n\n", app)),
+            ),
+            (Some("world"), Some(&|app| check("hello\n\nworld\n", app))),
+            // Once the caret is back up, the extra newlines go.
+            (
+                Some("<ret><ret><up><up>"),
+                Some(&|app| check("hello\n\nworld\n", app)),
+            ),
+        ],
+        false,
+    )
+    .await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn quitting_writes_every_file_after_confirmation() -> anyhow::Result<()> {
     let mut file = tempfile::NamedTempFile::new()?;
     let mut app = with_shortcuts().with_file(file.path(), None).build()?;

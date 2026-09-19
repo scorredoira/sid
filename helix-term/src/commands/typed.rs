@@ -473,19 +473,12 @@ fn write_impl(
     options: WriteOptions,
 ) -> anyhow::Result<()> {
     let config = cx.editor.config();
+    let typing = typing(cx.editor);
     let (view, doc) = current!(cx.editor);
     let doc_id = doc.id();
     let view_id = view.id;
 
-    if doc.trim_trailing_whitespace() {
-        trim_trailing_whitespace(doc, view_id);
-    }
-    if config.trim_final_newlines {
-        trim_final_newlines(doc, view_id);
-    }
-    if doc.insert_final_newline() {
-        insert_final_newline(doc, view_id);
-    }
+    tidy_before_save(doc, view_id, config.trim_final_newlines, typing);
 
     // Save an undo checkpoint for any outstanding changes.
     doc.append_changes_to_history(view);
@@ -642,13 +635,56 @@ fn write_the_named(cx: &mut compositor::Context) -> bool {
     true
 }
 
-/// Trim all whitespace preceding line-endings in a document.
-pub(crate) fn trim_trailing_whitespace(doc: &mut Document, view_id: ViewId) {
+/// The tidying every save does first - trailing whitespace, extra final newlines, the
+/// final newline - the same way at every place that saves, so a file is never written two
+/// different ways. While the text is being typed (`typing`), the caret's own line is left
+/// as it is: sid saves in the middle of a word, and trimming the space just typed would
+/// glue the next word to the last.
+pub(crate) fn tidy_before_save(
+    doc: &mut Document,
+    view_id: ViewId,
+    trim_final_newlines: bool,
+    typing: bool,
+) {
+    if doc.trim_trailing_whitespace() {
+        trim_trailing_whitespace(doc, view_id, typing);
+    }
+    if trim_final_newlines {
+        self::trim_final_newlines(doc, view_id, typing);
+    }
+    if doc.insert_final_newline() {
+        insert_final_newline(doc, view_id);
+    }
+}
+
+/// Whether the text is being typed into: a save that lands then must not move the caret.
+pub(crate) fn typing(editor: &Editor) -> bool {
+    editor.mode() == Mode::Insert
+}
+
+/// Trim all whitespace preceding line-endings in a document, leaving the lines the carets
+/// are on alone when `keep_caret_lines`: the space after the last word typed is the one
+/// the next word needs.
+pub(crate) fn trim_trailing_whitespace(
+    doc: &mut Document,
+    view_id: ViewId,
+    keep_caret_lines: bool,
+) {
     let text = doc.text();
+    let caret_lines: Vec<usize> = if keep_caret_lines {
+        let slice = text.slice(..);
+        doc.selection(view_id)
+            .ranges()
+            .iter()
+            .map(|range| slice.char_to_line(range.cursor(slice)))
+            .collect()
+    } else {
+        Vec::new()
+    };
     let mut pos = 0;
     let transaction = Transaction::delete(
         text,
-        text.lines().filter_map(|line| {
+        text.lines().enumerate().filter_map(|(number, line)| {
             let line_end_len_chars = line_ending::get_line_ending(&line)
                 .map(|le| le.len_chars())
                 .unwrap_or_default();
@@ -660,7 +696,7 @@ pub(crate) fn trim_trailing_whitespace(doc: &mut Document, view_id: ViewId) {
             // Char before the line ending character(s), or the final char in the text if there
             // is no line-ending on this line:
             let line_end = pos - line_end_len_chars;
-            if first_trailing_whitespace != line_end {
+            if first_trailing_whitespace != line_end && !caret_lines.contains(&number) {
                 Some((first_trailing_whitespace, line_end))
             } else {
                 None
@@ -670,8 +706,10 @@ pub(crate) fn trim_trailing_whitespace(doc: &mut Document, view_id: ViewId) {
     doc.apply(&transaction, view_id);
 }
 
-/// Trim any extra line-endings after the final line-ending.
-pub(crate) fn trim_final_newlines(doc: &mut Document, view_id: ViewId) {
+/// Trim any extra line-endings after the final line-ending, unless `keep_caret_lines` and
+/// a caret sits among them: the blank lines just opened at the end are where the typing
+/// goes next.
+pub(crate) fn trim_final_newlines(doc: &mut Document, view_id: ViewId, keep_caret_lines: bool) {
     let rope = doc.text();
     let mut text = rope.slice(..);
     let mut total_char_len = 0;
@@ -682,13 +720,23 @@ pub(crate) fn trim_final_newlines(doc: &mut Document, view_id: ViewId) {
         text = text.slice(..text.len_chars() - line_ending.len_chars());
     }
     let chars_to_delete = total_char_len - final_char_len;
-    if chars_to_delete != 0 {
-        let transaction = Transaction::delete(
-            rope,
-            [(rope.len_chars() - chars_to_delete, rope.len_chars())].into_iter(),
-        );
-        doc.apply(&transaction, view_id);
+    if chars_to_delete == 0 {
+        return;
     }
+    let from = rope.len_chars() - chars_to_delete;
+    if keep_caret_lines {
+        let slice = rope.slice(..);
+        let caret_among_them = doc
+            .selection(view_id)
+            .ranges()
+            .iter()
+            .any(|range| range.cursor(slice) > from);
+        if caret_among_them {
+            return;
+        }
+    }
+    let transaction = Transaction::delete(rope, [(from, rope.len_chars())].into_iter());
+    doc.apply(&transaction, view_id);
 }
 
 /// Ensure that the document is terminated with a line ending.
@@ -1215,6 +1263,7 @@ pub fn write_all_impl(
 ) -> anyhow::Result<()> {
     let mut errors: Vec<&'static str> = Vec::new();
     let config = cx.editor.config();
+    let typing = typing(cx.editor);
     let saves: Vec<_> = cx
         .editor
         .documents
@@ -1244,15 +1293,7 @@ pub fn write_all_impl(
         let doc = doc_mut!(cx.editor, &doc_id);
         let view = view_mut!(cx.editor, target_view);
 
-        if doc.trim_trailing_whitespace() {
-            trim_trailing_whitespace(doc, target_view);
-        }
-        if config.trim_final_newlines {
-            trim_final_newlines(doc, target_view);
-        }
-        if doc.insert_final_newline() {
-            insert_final_newline(doc, target_view);
-        }
+        tidy_before_save(doc, target_view, config.trim_final_newlines, typing);
 
         // Save an undo checkpoint for any outstanding changes.
         doc.append_changes_to_history(view);
