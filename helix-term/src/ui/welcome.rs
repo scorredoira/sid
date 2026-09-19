@@ -29,6 +29,7 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
         "Help",
         &[
             ("Command palette", "command_palette"),
+            ("Edit modally", "normal_mode"),
             ("Keyboard shortcuts", "keyboard_shortcuts"),
             ("Settings", "settings"),
             ("Check for updates", ":check-updates"),
