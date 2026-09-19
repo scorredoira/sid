@@ -421,6 +421,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_row_of_the_diff_knows_its_line_on_both_sides_for_the_hunk_under_it() {
+        use helix_view::review::HunkAt;
+        let patch = "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,3 +1,3 @@\n a\n-b\n+B\n c\n";
+        let parsed = parse(patch).unwrap();
+        let review = &parsed.review;
+        let at = |row: usize| review.hunk_at(row);
+        // Row 0 is the file's heading; rows 1.. the code.
+        assert_eq!(at(0), None);
+        assert_eq!(
+            at(1),
+            Some(HunkAt {
+                old: Some(1),
+                new: Some(1)
+            })
+        );
+        // A removed line borrows the new number of the line after it, an added line the
+        // old number of the line after it.
+        assert_eq!(
+            at(2),
+            Some(HunkAt {
+                old: Some(2),
+                new: Some(2)
+            })
+        );
+        assert_eq!(
+            at(3),
+            Some(HunkAt {
+                old: Some(3),
+                new: Some(2)
+            })
+        );
+    }
+
+    #[test]
     fn full_context_shows_the_entire_historical_file_and_preserves_the_review_location() {
         use std::{fs, process::Command};
         let dir = tempfile::tempdir().unwrap();

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use helix_core::{Selection, Transaction};
 use helix_view::editor::{Action, CloseError};
-use helix_view::review::ReviewAnchor;
+use helix_view::review::{HunkAt, ReviewAnchor};
 use helix_view::view::ViewPosition;
 use helix_view::{DocumentId, Editor, ViewId};
 
@@ -172,6 +172,29 @@ impl DiffView {
         })
     }
 
+    /// The uncommitted file whose diff the focused view shows, and where its cursor is in
+    /// that file, for git to find the hunk under it; none when the focused view shows
+    /// something else, a commit's diff, or a heading.
+    pub fn working_hunk(&self, editor: &Editor) -> Option<(git::ChangedFile, HunkAt)> {
+        let (view, doc) = current_ref!(editor);
+        let review = doc.review.as_ref().filter(|_| self.shows(doc.id()))?;
+        let target = &self.asked.as_ref()?.target;
+        let DiffSource::WorkingTree(file) = &target.source else {
+            return None;
+        };
+        let row = doc
+            .selection(view.id)
+            .primary()
+            .cursor_line(doc.text().slice(..));
+        Some((file.clone(), review.hunk_at(row)?))
+    }
+
+    /// Asks git again for the diff on screen, keeping the line under the cursor, after
+    /// the file or the index changed under it.
+    pub fn refresh(&mut self, editor: &mut Editor) {
+        self.ask_again(editor, "Open a diff to read it again", |_| {});
+    }
+
     pub fn full_context(&self) -> bool {
         self.full_context
     }
@@ -192,7 +215,8 @@ impl DiffView {
         });
     }
 
-    /// Asks the diff on screen again, changed by `change`, keeping the line under the cursor.
+    /// Asks the diff on screen again, changed by `change`, keeping the line under the
+    /// cursor; asked even when nothing changed, since the file may have.
     fn ask_again(&mut self, editor: &mut Editor, missing: &'static str, change: fn(&mut Self)) {
         let (view, doc) = current_ref!(editor);
         let Some(review) = doc.review.as_ref().filter(|_| self.shows(doc.id())) else {
@@ -204,7 +228,7 @@ impl DiffView {
             .primary()
             .cursor_line(doc.text().slice(..));
         let anchor = review.anchor(row);
-        let Some(request) = self.asked.clone() else {
+        let Some(request) = self.asked.take() else {
             return;
         };
         change(self);

@@ -615,6 +615,22 @@ impl Sidebar {
         self.commits.show_history(&mut cx, path);
     }
 
+    /// Whether the focused view shows an uncommitted diff with the cursor on a line of
+    /// code, so a hunk can be staged, unstaged or discarded from it.
+    pub fn hunk_under_cursor(&self, editor: &Editor) -> Option<git::ChangedFile> {
+        self.diff.working_hunk(editor).map(|(file, _)| file)
+    }
+
+    /// Stages or unstages the hunk under the cursor of the diff on screen. Discarding
+    /// one is asked about first: see [`changes::confirm_discard_hunk`].
+    pub fn act_on_hunk(&mut self, editor: &mut Editor, act: git::HunkAct) {
+        changes::act_on_hunk(self, editor, act);
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     /// The diff buffer's line under the cursor as a line to blame, and the folder to ask git
     /// in, when the focused view shows the diff buffer on a line of code.
     pub fn diff_blame_request(&self, editor: &Editor) -> Option<(PathBuf, git::BlameRequest)> {

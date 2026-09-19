@@ -310,6 +310,94 @@ pub fn confirm_discard(cx: &mut commands::Context, root: &Path, file: ChangedFil
     }
 }
 
+/// One hunk of the uncommitted diff on screen is staged, unstaged or discarded: git is
+/// asked for the file's hunks afresh, the one under the cursor found by its line, and
+/// applied on its own. The list and the diff are asked again when it is done; a file
+/// whose hunk was discarded is read again from disk if it is open. An untracked file is
+/// one hunk: it is staged whole, and never discarded here — that deletes it, and is
+/// asked about as the whole file's discard is.
+pub fn act_on_hunk(sidebar: &mut super::Sidebar, editor: &mut Editor, act: git::HunkAct) {
+    let Some((file, at)) = sidebar.diff.working_hunk(editor) else {
+        editor.set_error("Put the cursor on a line of an uncommitted diff to act on its hunk");
+        return;
+    };
+    if file.is_untracked() {
+        match act {
+            git::HunkAct::Stage => sidebar.changes.act(Act::Stage, file),
+            git::HunkAct::Unstage => {
+                editor.set_error("Git does not have the file: nothing is staged")
+            }
+            git::HunkAct::Discard => {
+                editor.set_error("Git does not have the file: discard it from the Changes tab")
+            }
+        }
+        return;
+    }
+    let root = sidebar.changes.root.clone();
+    super::background(
+        move || {
+            let staged = act == git::HunkAct::Unstage;
+            let (header, hunks) = git::file_hunks(&root, &file, staged)?;
+            // Unstaging reads the index against the last commit, whose lines are the old
+            // side's; the other two read the working tree, the new side.
+            let line = if staged { at.old } else { at.new };
+            let hunk = line
+                .and_then(|line| git::hunk_holding(&hunks, staged, line))
+                .ok_or("No hunk under the cursor")?;
+            git::apply_hunk(&root, &header, hunk, act)?;
+            Ok::<_, String>(file)
+        },
+        move |sidebar, editor, answer| {
+            match answer {
+                Err(err) => editor.set_error(err),
+                Ok(file) => {
+                    if act == git::HunkAct::Discard {
+                        reload_document(editor, &file.path);
+                    }
+                    // The reader may have left the diff meanwhile: nothing to read again.
+                    if sidebar.diff.is_on_screen(editor) {
+                        sidebar.diff.refresh(editor);
+                    }
+                }
+            }
+            sidebar.changes.ask();
+        },
+    );
+}
+
+/// Asks before one hunk of `file` is thrown away, in the usual box.
+pub fn confirm_discard_hunk(cx: &mut commands::Context, root: &Path, file: &ChangedFile) {
+    let relative = file.path.strip_prefix(root).unwrap_or(&file.path);
+    let name = relative.display().to_string();
+    let mut lines = vec![
+        format!("Discard this hunk of \"{name}\"?"),
+        "The change under the cursor is lost; the rest of the file stays.".to_string(),
+    ];
+    if super::files::unsaved_under(cx.editor, &file.path) {
+        lines.push("Unsaved changes to the file in the editor will be lost too.".to_string());
+    }
+    let answers = vec![
+        Answer::new("Cancel", Box::new(|_| {})),
+        Answer::new(
+            "Discard",
+            Box::new(move |cx| {
+                let callback = Box::pin(async move {
+                    let call =
+                        job::Callback::EditorCompositor(Box::new(move |editor, compositor| {
+                            if let Some(view) = compositor.find::<EditorView>() {
+                                act_on_hunk(&mut view.sidebar, editor, git::HunkAct::Discard);
+                            }
+                        }));
+                    Ok(call)
+                });
+                cx.jobs.callback(callback);
+            }),
+        )
+        .destructive(),
+    ];
+    cx.push_layer(Box::new(Confirm::new("Confirm", lines, answers)));
+}
+
 /// What the box asks before `name` is discarded: deleted when git does not have it,
 /// restored otherwise, and, when a buffer holds edits to it not saved yet, that those go
 /// too.

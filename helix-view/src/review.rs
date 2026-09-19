@@ -60,6 +60,15 @@ pub struct ReviewAnchor {
     kind: LineKind,
 }
 
+/// Where a row of the diff is in the file, on each side, for git to find the hunk that
+/// holds it: the row's own line numbers when it has them, else the nearest in the same
+/// run of code, since a removed line has no new number and an added one no old.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HunkAt {
+    pub old: Option<usize>,
+    pub new: Option<usize>,
+}
+
 impl Review {
     pub fn prepare_line_numbers(&mut self, text: &str) {
         self.number_annotations.iter_mut().for_each(Vec::clear);
@@ -106,6 +115,31 @@ impl Review {
             old: line.old,
             new: line.new,
             kind: line.kind,
+        })
+    }
+
+    /// Where row `row`, a line of code, is on each side of the file; none for a heading
+    /// or a note. A side the row has no line on takes the nearest line that has one,
+    /// looking down the run of code the row is in first, then up it.
+    pub fn hunk_at(&self, row: usize) -> Option<HunkAt> {
+        let line = self.lines.get(row)?;
+        line.source?;
+        let is_code = |line: &ReviewLine| line.source.is_some();
+        let down = self.lines[row + 1..]
+            .iter()
+            .take_while(|line| is_code(line));
+        let up = self.lines[..row]
+            .iter()
+            .rev()
+            .take_while(|line| is_code(line));
+        let nearest = |side: fn(&ReviewLine) -> Option<usize>| {
+            side(line)
+                .or_else(|| down.clone().find_map(side))
+                .or_else(|| up.clone().find_map(side))
+        };
+        Some(HunkAt {
+            old: nearest(|line| line.old),
+            new: nearest(|line| line.new),
         })
     }
 

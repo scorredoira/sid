@@ -147,6 +147,11 @@ A-F = ":format"
 "C-A-l" = "file_history"
 # And a diff side by side, or one side above the other.
 "C-A-d" = "review_side_by_side_toggle"
+# One hunk of the uncommitted diff on screen, the one under the cursor: into the index,
+# out of it, or thrown away after asking. From the diff or from the Changes list alike.
+"C-A-s" = "hunk_stage"
+"C-A-u" = "hunk_unstage"
+"C-A-x" = "hunk_discard"
 # The outline of the file, its functions and types, under the file tree.
 "C-A-o" = "outline_toggle"
 C-B = "markdown_preview_toggle"

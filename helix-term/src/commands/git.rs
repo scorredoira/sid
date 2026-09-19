@@ -145,6 +145,39 @@ pub fn review_files_toggle(cx: &mut Context) {
     }));
 }
 
+/// Stages the hunk under the cursor of the uncommitted diff on screen.
+pub fn hunk_stage(cx: &mut Context) {
+    act_on_hunk(cx, git::HunkAct::Stage);
+}
+
+/// Takes the hunk under the cursor out of the index; the file keeps it.
+pub fn hunk_unstage(cx: &mut Context) {
+    act_on_hunk(cx, git::HunkAct::Unstage);
+}
+
+fn act_on_hunk(cx: &mut Context, act: git::HunkAct) {
+    cx.callback.push(Box::new(move |compositor, cx| {
+        let view = compositor.find::<EditorView>().unwrap();
+        view.sidebar.act_on_hunk(cx.editor, act);
+    }));
+}
+
+/// Throws the hunk under the cursor away, after asking.
+pub fn hunk_discard(cx: &mut Context) {
+    cx.callback.push(Box::new(|compositor, cx| {
+        let view = compositor.find::<EditorView>().unwrap();
+        let Some(file) = view.sidebar.hunk_under_cursor(cx.editor) else {
+            cx.editor
+                .set_error("Put the cursor on a line of an uncommitted diff to discard its hunk");
+            return;
+        };
+        let root = view.sidebar.root().to_path_buf();
+        ui::context_menu::with_context(compositor, cx, |cx| {
+            ui::sidebar::changes::confirm_discard_hunk(cx, &root, &file);
+        });
+    }));
+}
+
 pub fn review_context_toggle(cx: &mut Context) {
     cx.callback.push(Box::new(|compositor, cx| {
         let view = compositor.find::<EditorView>().unwrap();

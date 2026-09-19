@@ -507,6 +507,151 @@ pub fn unstage(root: &Path, file: &ChangedFile) -> Answer<()> {
     run(root, &args).map(|_| ())
 }
 
+/// One hunk of a file's patch: where it sits on each side, and its lines, header first,
+/// ready to be applied under the file's own header.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Hunk {
+    pub old_start: usize,
+    pub old_count: usize,
+    pub new_start: usize,
+    pub new_count: usize,
+    pub text: String,
+}
+
+impl Hunk {
+    /// Whether line `line` of one side, the old with `old`, is among the hunk's lines,
+    /// its context included: a hunk that only removes has no new lines of its own, and
+    /// is found by the context around them.
+    fn holds(&self, old: bool, line: usize) -> bool {
+        let (start, count) = if old {
+            (self.old_start, self.old_count)
+        } else {
+            (self.new_start, self.new_count)
+        };
+        line >= start && line < start + count.max(1)
+    }
+}
+
+/// The hunks of `file` in the patch git gives for it right now — against the index, or
+/// with `staged` the index against the last commit — with the header they apply under.
+/// A hunk acted on is always taken from a fresh patch: what is on screen was read
+/// against the last commit, and may be older than the file.
+pub fn file_hunks(root: &Path, file: &ChangedFile, staged: bool) -> Answer<(String, Vec<Hunk>)> {
+    let path = format!(":(literal){}", file.path.display());
+    let from = file.from.as_deref().map(pathspec);
+    let mut args = vec!["diff"];
+    if staged {
+        args.push("--cached");
+    }
+    args.extend([
+        "--no-textconv",
+        "--no-relative",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        "--unified=3",
+        "--no-color",
+        "--no-ext-diff",
+        "-M",
+        "--",
+        path.as_str(),
+    ]);
+    if let Some(from) = &from {
+        args.push(from);
+    }
+    let patch = run(root, &args)?;
+    split_hunks(&String::from_utf8_lossy(&patch))
+}
+
+/// Cuts one file's patch into its header and its hunks.
+pub fn split_hunks(patch: &str) -> Answer<(String, Vec<Hunk>)> {
+    let mut header = String::new();
+    let mut hunks: Vec<Hunk> = Vec::new();
+    for line in patch.split_inclusive('\n') {
+        if let Some(range) = line.strip_prefix("@@ ") {
+            let mut parts = range.split_whitespace();
+            let before = parts.next().ok_or("git diff: missing old range")?;
+            let after = parts.next().ok_or("git diff: missing new range")?;
+            let (old_start, old_count) = hunk_range(before, '-')?;
+            let (new_start, new_count) = hunk_range(after, '+')?;
+            hunks.push(Hunk {
+                old_start,
+                old_count,
+                new_start,
+                new_count,
+                text: line.to_string(),
+            });
+        } else if let Some(hunk) = hunks.last_mut() {
+            hunk.text.push_str(line);
+        } else {
+            header.push_str(line);
+        }
+    }
+    Ok((header, hunks))
+}
+
+fn hunk_range(value: &str, prefix: char) -> Answer<(usize, usize)> {
+    let value = value
+        .strip_prefix(prefix)
+        .ok_or("git diff: invalid range prefix")?;
+    let (start, count) = value.split_once(',').unwrap_or((value, "1"));
+    let start = start.parse().map_err(|_| "git diff: invalid line number")?;
+    let count = count.parse().map_err(|_| "git diff: invalid line count")?;
+    Ok((start, count))
+}
+
+/// The hunk among `hunks` that holds line `line` of the old side with `old`, of the new
+/// side otherwise.
+pub fn hunk_holding(hunks: &[Hunk], old: bool, line: usize) -> Option<&Hunk> {
+    hunks.iter().find(|hunk| hunk.holds(old, line))
+}
+
+/// What is done to one hunk of a file.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HunkAct {
+    /// Into the index.
+    Stage,
+    /// Out of the index; the working tree keeps it.
+    Unstage,
+    /// Out of the working tree; the index keeps what it has.
+    Discard,
+}
+
+/// Applies `hunk` under `header` as `act` says, through `git apply`, which takes the
+/// patch on its standard input.
+pub fn apply_hunk(root: &Path, header: &str, hunk: &Hunk, act: HunkAct) -> Answer<()> {
+    let mut args = vec!["apply", "--whitespace=nowarn"];
+    match act {
+        HunkAct::Stage => args.push("--cached"),
+        HunkAct::Unstage => args.extend(["--cached", "-R"]),
+        HunkAct::Discard => args.push("-R"),
+    }
+    args.push("-");
+    let mut child = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("git: {err}"))?;
+    let written = match child.stdin.take() {
+        Some(mut stdin) => stdin
+            .write_all(header.as_bytes())
+            .and_then(|_| stdin.write_all(hunk.text.as_bytes())),
+        None => Ok(()),
+    };
+    let output = child
+        .wait_with_output()
+        .map_err(|err| format!("git apply: {err}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let reason = stderr.lines().next().unwrap_or("failed").to_string();
+        return Err(format!("git apply: {reason}"));
+    }
+    written.map_err(|err| format!("git apply: {err}"))
+}
+
 /// Throws working changes away, preserving the index as the confirmation promises.
 /// An untracked file is deleted; a tracked file goes back to its staged contents.
 pub fn discard(root: &Path, file: &ChangedFile) -> Answer<()> {
@@ -816,6 +961,88 @@ mod tests {
         let files = status(root).unwrap();
         assert_eq!(files[0].staged, Some(Change::Modified));
         assert_eq!(files[0].unstaged, None);
+    }
+
+    #[test]
+    fn a_hunk_is_staged_unstaged_and_discarded_on_its_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        run(root, &["init", "--quiet"]).unwrap();
+        let path = root.join("a.txt");
+        let base: String = (1..=20).map(|n| format!("line {n}\n")).collect();
+        std::fs::write(&path, &base).unwrap();
+        run(root, &["add", "a.txt"]).unwrap();
+        run(
+            root,
+            &[
+                "-c",
+                "user.name=sid Test",
+                "-c",
+                "user.email=sid@example.invalid",
+                "commit",
+                "--quiet",
+                "-m",
+                "initial",
+            ],
+        )
+        .unwrap();
+        // Two changes far enough apart for two hunks: the top edited, the bottom removed.
+        let edited = base
+            .replace("line 2\n", "line two\n")
+            .replace("line 19\n", "");
+        std::fs::write(&path, &edited).unwrap();
+        let file = status(root).unwrap().remove(0);
+
+        let (header, hunks) = file_hunks(root, &file, false).unwrap();
+        assert!(header.starts_with("diff --git a/a.txt b/a.txt\n"));
+        assert_eq!(hunks.len(), 2);
+        // The second hunk holds the removed line by its old number, and the lines around
+        // it by their new ones.
+        assert_eq!(hunk_holding(&hunks, true, 19), Some(&hunks[1]));
+        assert_eq!(hunk_holding(&hunks, false, 18), Some(&hunks[1]));
+        assert_eq!(hunk_holding(&hunks, false, 2), Some(&hunks[0]));
+        assert_eq!(hunk_holding(&hunks, false, 10), None);
+
+        // Staging the first leaves the second in the working tree only.
+        apply_hunk(root, &header, &hunks[0], HunkAct::Stage).unwrap();
+        let file = status(root).unwrap().remove(0);
+        assert_eq!(file.staged, Some(Change::Modified));
+        assert_eq!(file.unstaged, Some(Change::Modified));
+        let (_, staged) = file_hunks(root, &file, true).unwrap();
+        assert_eq!(staged.len(), 1);
+        assert!(staged[0].text.contains("+line two\n"));
+        let (_, unstaged) = file_hunks(root, &file, false).unwrap();
+        assert_eq!(unstaged.len(), 1);
+        assert!(unstaged[0].text.contains("-line 19\n"));
+
+        // Unstaged again, the index is as the commit left it; discarded, so is the file
+        // around the change kept.
+        let (header, staged) = file_hunks(root, &file, true).unwrap();
+        apply_hunk(root, &header, &staged[0], HunkAct::Unstage).unwrap();
+        let file = status(root).unwrap().remove(0);
+        assert_eq!(file.staged, None);
+        let (header, hunks) = file_hunks(root, &file, false).unwrap();
+        assert_eq!(hunks.len(), 2);
+        apply_hunk(root, &header, &hunks[1], HunkAct::Discard).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            base.replace("line 2\n", "line two\n")
+        );
+    }
+
+    #[test]
+    fn a_patch_is_cut_into_its_header_and_hunks() {
+        let patch = "diff --git a/f b/f\nindex 1..2 100644\n--- a/f\n+++ b/f\n@@ -1,3 +1,3 @@\n a\n-b\n+B\n c\n@@ -10,2 +10,1 @@\n x\n-y\n";
+        let (header, hunks) = split_hunks(patch).unwrap();
+        assert_eq!(
+            header,
+            "diff --git a/f b/f\nindex 1..2 100644\n--- a/f\n+++ b/f\n"
+        );
+        assert_eq!(hunks.len(), 2);
+        assert_eq!(hunks[0].text, "@@ -1,3 +1,3 @@\n a\n-b\n+B\n c\n");
+        assert_eq!((hunks[1].old_start, hunks[1].old_count), (10, 2));
+        assert_eq!((hunks[1].new_start, hunks[1].new_count), (10, 1));
+        assert!(split_hunks("").unwrap().1.is_empty());
     }
 
     fn root() -> PathBuf {

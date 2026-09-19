@@ -2762,13 +2762,39 @@ pub fn editor_menu_at(row: u16, column: u16) -> crate::compositor::Callback {
     Box::new(move |compositor, cx| {
         let review = doc!(cx.editor).review.is_some();
         let mut entries = if review {
-            vec![context_menu::Entry::new(
+            let mut entries = vec![context_menu::Entry::new(
                 "Copy",
                 "Ctrl-c",
                 Box::new(|compositor, cx| {
                     run_command(compositor, cx, MappableCommand::copy_to_clipboard)
                 }),
-            )]
+            )];
+            // On a line of an uncommitted diff, the hunk under the pointer is acted on.
+            let on_hunk = compositor
+                .find::<EditorView>()
+                .is_some_and(|view| view.sidebar.hunk_under_cursor(cx.editor).is_some());
+            if on_hunk {
+                for (label, keys, command) in [
+                    ("Stage the hunk", "Ctrl-Alt-s", MappableCommand::hunk_stage),
+                    (
+                        "Unstage the hunk",
+                        "Ctrl-Alt-u",
+                        MappableCommand::hunk_unstage,
+                    ),
+                    (
+                        "Discard the hunk",
+                        "Ctrl-Alt-x",
+                        MappableCommand::hunk_discard,
+                    ),
+                ] {
+                    entries.push(context_menu::Entry::new(
+                        label,
+                        keys,
+                        Box::new(move |compositor, cx| run_command(compositor, cx, command)),
+                    ));
+                }
+            }
+            entries
         } else {
             vec![
                 context_menu::Entry::new(
