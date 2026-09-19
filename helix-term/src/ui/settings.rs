@@ -183,7 +183,7 @@ impl Settings {
     /// Changes the setting in focus: a switch flips, a word gives way to the next one.
     fn change(&mut self, cx: &mut Context) {
         let setting = &SETTINGS[self.cursor];
-        let current = read(cx.editor, setting.key);
+        let current = read(&snapshot(cx.editor), setting.key);
         let next = match (&setting.kind, &current) {
             (Kind::Switch, Value::Bool(on)) => Value::Bool(!on),
             (Kind::Words(words), Value::String(word)) => {
@@ -278,9 +278,15 @@ fn given(setting: &Setting) -> String {
     }
 }
 
-/// What a setting is set to right now.
-fn read(editor: &Editor, key: &str) -> Value {
-    let config = serde_json::json!(&*editor.config());
+/// The whole configuration as it is right now, read once: every setting is looked up in
+/// it, and turning the editor's configuration into JSON once per setting per frame is
+/// most of what drawing the screen would cost.
+fn snapshot(editor: &Editor) -> Value {
+    serde_json::json!(&*editor.config())
+}
+
+/// What a setting is set to in a snapshot of the configuration.
+fn read(config: &Value, key: &str) -> Value {
     let pointer = format!("/{}", key.replace('.', "/"));
 
     config.pointer(&pointer).cloned().unwrap_or(Value::Null)
@@ -368,8 +374,13 @@ fn as_toml(value: &Value) -> anyhow::Result<toml_edit::Value> {
     }
 }
 
-/// Written aside and renamed over, so a crash never leaves half a configuration.
+/// Written aside and renamed over, so a crash never leaves half a configuration. A
+/// config.toml that is a link to a file elsewhere — a dotfiles checkout, say — is
+/// written where it points: renaming over the link would turn it into a file of its
+/// own, and the checkout would never see the change.
 pub(crate) fn write_atomically(path: &Path, text: String) -> anyhow::Result<()> {
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let path = path.as_path();
     let directory = path
         .parent()
         .context("the configuration file sits in a directory")?;
@@ -402,6 +413,7 @@ fn shown(setting: &Setting, value: &Value) -> String {
 
 impl Component for Settings {
     fn render(&mut self, area: Rect, surface: &mut Surface, cx: &mut Context) {
+        let config = snapshot(cx.editor);
         let labels = SETTINGS
             .iter()
             .map(|setting| setting.label.chars().count())
@@ -409,11 +421,7 @@ impl Component for Settings {
             .unwrap_or(0) as u16;
         let values = SETTINGS
             .iter()
-            .map(|setting| {
-                shown(setting, &read(cx.editor, setting.key))
-                    .chars()
-                    .count()
-            })
+            .map(|setting| shown(setting, &read(&config, setting.key)).chars().count())
             .max()
             .unwrap_or(0) as u16;
 
@@ -460,7 +468,7 @@ impl Component for Settings {
             let label_style = if focused { selected } else { text };
             surface.set_stringn(inner.x, y, setting.label, inner.width as usize, label_style);
 
-            let value = shown(setting, &read(cx.editor, setting.key));
+            let value = shown(setting, &read(&config, setting.key));
             let at = inner.right().saturating_sub(value.chars().count() as u16);
             let style = if focused { selected } else { value_style };
             surface.set_stringn(at, y, &value, inner.width as usize, style);
@@ -591,6 +599,24 @@ mod tests {
                 .from_mode(helix_view::document::Mode::Insert),
             helix_view::graphics::CursorKind::Block
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_config_that_is_a_link_is_written_where_it_points() {
+        let directory = tempfile::tempdir().unwrap();
+        let real = directory.path().join("dotfiles").join("sid.toml");
+        std::fs::create_dir_all(real.parent().unwrap()).unwrap();
+        std::fs::write(&real, "theme = \"github_dark\"\n").unwrap();
+        let link = directory.path().join("config.toml");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        write_setting(&link, "mouse", &Value::Bool(false)).unwrap();
+
+        assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink());
+        let written = std::fs::read_to_string(&real).unwrap();
+        assert!(written.contains("theme = \"github_dark\""));
+        assert!(written.contains("mouse = false"), "{written}");
     }
 
     #[test]
