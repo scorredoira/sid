@@ -223,9 +223,15 @@ impl Settings {
 
 /// What a setting reads as when it is named by key: what `:toggle <key>` does, in the
 /// words the settings screen uses, so a shortcut for it says something.
-pub(crate) fn told(key: &str) -> Option<String> {
-    let setting = SETTINGS.iter().find(|setting| setting.key == key)?;
-    Some(said(setting))
+pub(crate) fn told(args: &str) -> Option<String> {
+    Some(said(named(args)?))
+}
+
+/// The setting `:toggle-option` was given, which is the first word of its arguments: the
+/// rest, where there is any, are the values it walks.
+fn named(args: &str) -> Option<&'static Setting> {
+    let key = args.split_whitespace().next()?;
+    SETTINGS.iter().find(|setting| setting.key == key)
 }
 
 fn said(setting: &Setting) -> String {
@@ -237,12 +243,8 @@ fn said(setting: &Setting) -> String {
 
 /// The other words somebody might look for a setting by, for the palette to search and
 /// never show.
-pub(crate) fn also(key: &str) -> &'static str {
-    SETTINGS
-        .iter()
-        .find(|setting| setting.key == key)
-        .map(|setting| setting.also)
-        .unwrap_or_default()
+pub(crate) fn also(args: &str) -> &'static str {
+    named(args).map(|setting| setting.also).unwrap_or_default()
 }
 
 /// Every setting as the command that flips it, for the command palette: the screen's
@@ -251,8 +253,21 @@ pub(crate) fn also(key: &str) -> &'static str {
 pub(crate) fn as_commands() -> Vec<(String, String)> {
     SETTINGS
         .iter()
-        .map(|setting| (setting.key.to_string(), said(setting)))
+        .map(|setting| (given(setting), said(setting)))
         .collect()
+}
+
+/// What `:toggle-option` has to be given for the setting: its key, and for one that is a
+/// few words, the words themselves, because that is how the command walks them. Without
+/// them it answers "Bad arguments" and the shortcut does nothing.
+fn given(setting: &Setting) -> String {
+    match setting.kind {
+        Kind::Switch => setting.key.to_string(),
+        Kind::Words(words) => {
+            let values: Vec<_> = words.iter().map(|(value, _)| *value).collect();
+            format!("{} {}", setting.key, values.join(" "))
+        }
+    }
 }
 
 /// What a setting is set to right now.
@@ -494,6 +509,28 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_setting_of_a_few_words_is_given_them_or_it_cannot_be_flipped() {
+        for (args, doc) in as_commands() {
+            let command: crate::commands::MappableCommand =
+                format!(":toggle-option {args}").parse().unwrap();
+            let crate::commands::MappableCommand::Typable { args, .. } = &command else {
+                panic!("a setting flips through the command line");
+            };
+            let setting = named(args).expect("it names a setting of this screen");
+            match setting.kind {
+                // `:toggle-option <key>` on a switch, and nothing else.
+                Kind::Switch => assert_eq!(args.split_whitespace().count(), 1, "{doc}"),
+                // And every word of one that is a few, in the order it walks them.
+                Kind::Words(words) => {
+                    let given: Vec<_> = args.split_whitespace().skip(1).collect();
+                    let expected: Vec<_> = words.iter().map(|(value, _)| *value).collect();
+                    assert_eq!(given, expected, "{doc}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn the_word_on_screen_is_not_always_the_word_config_toml_keeps() {

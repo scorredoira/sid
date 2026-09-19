@@ -153,41 +153,6 @@ fn settled(key: KeyEvent) -> KeyEvent {
     key
 }
 
-/// Walks a keymap gathering every shortcut in it, as keys and what they run.
-fn walk(
-    trie: &KeyTrie,
-    path: &mut Vec<KeyEvent>,
-    enhanced: bool,
-    found: &mut Vec<(Vec<KeyEvent>, Runs, String)>,
-) {
-    match trie {
-        KeyTrie::Node(node) => {
-            for (key, child) in node.iter() {
-                // A key this terminal never sends is not a shortcut here.
-                if !crate::keymap::key_reaches(key, enhanced) {
-                    continue;
-                }
-                path.push(*key);
-                walk(child, path, enhanced, found);
-                path.pop();
-            }
-        }
-        KeyTrie::MappableCommand(command) if command.name() == "no_op" => {}
-        KeyTrie::MappableCommand(command) => {
-            found.push((path.clone(), Runs::of(command), command.doc().to_string()))
-        }
-        KeyTrie::Sequence(commands) => found.push((
-            path.clone(),
-            Runs::Many(commands.iter().map(bindings::written).collect()),
-            commands
-                .iter()
-                .map(|command| command.doc())
-                .collect::<Vec<_>>()
-                .join("; "),
-        )),
-    }
-}
-
 impl Shortcuts {
     pub fn new(maps: &HashMap<Mode, KeyTrie>, enhanced: bool) -> Self {
         let mut screen = Self {
@@ -241,7 +206,7 @@ impl Shortcuts {
                 continue;
             };
             let mut found = Vec::new();
-            walk(map, &mut Vec::new(), self.enhanced, &mut found);
+            bindings::walk(map, &mut Vec::new(), self.enhanced, &mut found);
             for (keys, runs, description) in found {
                 let entry = (keys, runs);
                 let seen = modes.entry(entry.clone()).or_insert_with(|| {

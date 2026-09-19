@@ -150,6 +150,56 @@ pub fn describes(trie: &KeyTrie) -> String {
     }
 }
 
+/// Walks a keymap gathering every shortcut in it, as keys and what they run.
+pub fn walk(
+    trie: &KeyTrie,
+    path: &mut Vec<KeyEvent>,
+    enhanced: bool,
+    found: &mut Vec<(Vec<KeyEvent>, Runs, String)>,
+) {
+    match trie {
+        KeyTrie::Node(node) => {
+            for (key, child) in node.iter() {
+                // A key this terminal never sends is not a shortcut here.
+                if !crate::keymap::key_reaches(key, enhanced) {
+                    continue;
+                }
+                path.push(*key);
+                walk(child, path, enhanced, found);
+                path.pop();
+            }
+        }
+        KeyTrie::MappableCommand(command) if command.name() == "no_op" => {}
+        KeyTrie::MappableCommand(command) => {
+            found.push((path.clone(), Runs::of(command), command.doc().to_string()))
+        }
+        KeyTrie::Sequence(commands) => found.push((
+            path.clone(),
+            Runs::Many(commands.iter().map(written).collect()),
+            commands
+                .iter()
+                .map(|command| command.doc())
+                .collect::<Vec<_>>()
+                .join("; "),
+        )),
+    }
+}
+/// The shortcuts of a keymap, by what they run.
+pub type ByAction = HashMap<Runs, Vec<Vec<KeyEvent>>>;
+
+/// Every shortcut of a keymap by what it runs, which is how a command given arguments is
+/// told from the same command given others: by name alone every `:toggle-option` is the
+/// same command, and they would all show the first one's keys.
+pub fn by_action(map: &KeyTrie, enhanced: bool) -> ByAction {
+    let mut found = Vec::new();
+    walk(map, &mut Vec::new(), enhanced, &mut found);
+    let mut by_action = ByAction::new();
+    for (keys, runs, _) in found {
+        by_action.entry(runs).or_default().push(keys);
+    }
+    by_action
+}
+
 /// What stands in the way of giving a key to an action.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Clash {

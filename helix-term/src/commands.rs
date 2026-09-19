@@ -5233,9 +5233,10 @@ pub fn command_palette(cx: &mut Context) {
 
     cx.callback.push(Box::new(
         move |compositor: &mut Compositor, cx: &mut compositor::Context| {
-            let keymap = crate::keymap::reachable(
-                compositor.find::<ui::EditorView>().unwrap().keymaps.map()[&cx.editor.mode]
-                    .reverse_map(),
+            // By what each key runs, arguments and all: every ":toggle-option" is the
+            // same command by name, and by name they would all wear the first one's keys.
+            let keymap = ui::bindings::by_action(
+                &compositor.find::<ui::EditorView>().unwrap().keymaps.map()[&cx.editor.mode],
                 cx.editor.keyboard_enhanced,
             );
 
@@ -5251,9 +5252,9 @@ pub fn command_palette(cx: &mut Context) {
             let columns = [
                 ui::PickerColumn::new(
                     "shortcut",
-                    |item: &MappableCommand, keymap: &crate::keymap::ReverseKeymap| {
+                    |item: &MappableCommand, keymap: &ui::bindings::ByAction| {
                         keymap
-                            .get(item.name())
+                            .get(&ui::bindings::Runs::of(item))
                             .map(|bindings| palette_keys(bindings))
                             .unwrap_or_default()
                             .into()
