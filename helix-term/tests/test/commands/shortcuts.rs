@@ -4,6 +4,37 @@ use helix_view::document::Mode;
 
 use super::*;
 
+#[tokio::test(flavor = "multi_thread")]
+async fn moving_lines_preserves_the_final_line_ending() -> anyhow::Result<()> {
+    for (before, keys, after) in [
+        ("#[a|]#lpha\nbeta", "<C-down>", "beta\n#[a|]#lpha"),
+        ("alpha\n#[b|]#eta", "<C-up>", "#[b|]#eta\nalpha"),
+        ("#[a|]#lpha\nbeta\n", "<C-down>", "beta\n#[a|]#lpha\n"),
+        ("#[a|]#lpha\r\nbeta", "<C-down>", "beta\r\n#[a|]#lpha"),
+        ("#[a|]#lpha\nbeta", "<C-down>u", "#[a|]#lpha\nbeta"),
+    ] {
+        let mut config = helpers::test_config();
+        config.editor.default_line_ending = if before.contains("\r\n") {
+            helix_view::editor::LineEndingConfig::Crlf
+        } else {
+            helix_view::editor::LineEndingConfig::LF
+        };
+        config.keys.insert(
+            Mode::Normal,
+            keymap!({"Normal mode"
+                "C-up" => move_lines_up,
+                "C-down" => move_lines_down,
+            }),
+        );
+        test_with_config(
+            AppBuilder::new().with_config(config),
+            (before, format!("<esc>{keys}"), after, LineFeedHandling::AsIs),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 fn with_shortcuts() -> AppBuilder {
     let mut config = helpers::test_config();
     config.keys.insert(

@@ -6746,22 +6746,18 @@ fn move_lines(cx: &mut Context, direction: Direction) {
 
     // The file's last line has no ending: whichever half lands last keeps that, so the
     // one that used to be last gives its ending to the one taking its place.
-    let moved_by = other.chars().count();
+    let mut moved_by = other.chars().count();
     let (mut left, mut right) = match direction {
         Direction::Backward => (block, other),
         Direction::Forward => (other, block),
     };
-    if !right.ends_with(ending) && left.ends_with(ending) {
-        left.truncate(left.len() - ending.len());
-        right.push_str(ending);
+    if !left.ends_with(ending) && right.ends_with(ending) {
+        right.truncate(right.len() - ending.len());
+        left.push_str(ending);
+        if direction == Direction::Forward {
+            moved_by += ending.chars().count();
+        }
     }
-
-    let moved = format!("{left}{right}");
-    let transaction = Transaction::change(
-        doc.text(),
-        std::iter::once((start, end, Some(moved.into()))),
-    );
-    doc.apply(&transaction, view.id);
 
     // The selection goes with the text it was on.
     let shift = match direction {
@@ -6774,7 +6770,13 @@ fn move_lines(cx: &mut Context, direction: Direction) {
             range.head.saturating_add_signed(shift),
         )
     });
-    doc.set_selection(view.id, selection);
+    let moved = format!("{left}{right}");
+    let transaction = Transaction::change(
+        doc.text(),
+        std::iter::once((start, end, Some(moved.into()))),
+    )
+    .with_selection(selection);
+    doc.apply(&transaction, view.id);
 }
 
 /// The word under the caret; pressed again, where that word appears next, as one more
