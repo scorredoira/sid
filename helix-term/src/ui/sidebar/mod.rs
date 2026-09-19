@@ -66,8 +66,17 @@ const BESIDE_WIDTH: u16 = 46;
 /// Where the width the separator was dragged to is remembered.
 const WIDTH_FILE: &str = "sidebar";
 
+/// Where the height is remembered, for the sidebar across the top with the code under it.
+const HEIGHT_FILE: &str = "sidebar-height";
+
 /// The columns the sidebar always leaves to the editor, however wide it is asked to be.
 pub const EDITOR_ROOM: u16 = 20;
+
+/// The rows it leaves to the editor when the code is under it.
+pub const EDITOR_ROWS: u16 = 5;
+
+/// The fewest rows the rule under it can be dragged to.
+const MIN_HEIGHT: u16 = 4;
 
 /// Where the rule between two panes sits: along a row when one is under the other, down
 /// a column when they stand side by side.
@@ -121,6 +130,11 @@ pub struct Sidebar {
     /// Whether the Commits tab stands alone, without the strip of tabs over it: how
     /// `--commits` opens, until another tab is shown.
     alone: bool,
+    /// Whether the sidebar runs across the top of the screen with the code under it,
+    /// instead of down the left with the code beside it. The setting, read each render.
+    below: bool,
+    /// The rows it was dragged to across the top; none before it ever was.
+    height: Option<u16>,
     /// Whether the first render has laid the rows out; before it there is no editor to ask.
     built: bool,
     /// The document the sidebar last moved onto, so a buffer switch is noticed at render.
@@ -204,6 +218,14 @@ impl Sidebar {
             }
         };
         let (outline, outline_error) = Outline::new();
+        let (height, height_error) = match panel_width::load(HEIGHT_FILE) {
+            Ok(height) => (height, None),
+            Err(err) => {
+                log::error!("Could not read the sidebar's height: {err:#}");
+                let message = format!("Could not read the sidebar's height: {err:#}");
+                (None, Some(message))
+            }
+        };
         Self {
             files: FilesTab::new(root.clone()),
             changes: ChangesTab::new(root.clone()),
@@ -217,6 +239,8 @@ impl Sidebar {
             focused: false,
             code_hidden: false,
             alone: false,
+            below: false,
+            height,
             built: false,
             revealed: None,
             area: Rect::default(),
@@ -227,10 +251,28 @@ impl Sidebar {
             resizing: false,
             resizing_split: false,
             commit_layout,
-            width_error: width_error.or(layout_error).or(outline_error),
+            width_error: width_error
+                .or(height_error)
+                .or(layout_error)
+                .or(outline_error),
             last_click: None,
             typed: (String::new(), None),
         }
+    }
+
+    /// Across the top it starts at half the rows; an explicit drag wins.
+    pub fn height(&self, screen_height: u16) -> u16 {
+        self.height.unwrap_or(screen_height / 2).max(MIN_HEIGHT)
+    }
+
+    /// Where the code goes, from the setting: beside the sidebar, or under it. Told
+    /// before each render, so the areas are cut the way it says.
+    pub fn place(&mut self, below: bool) {
+        self.below = below;
+    }
+
+    pub fn below(&self) -> bool {
+        self.below
     }
 
     /// Commits starts at half the terminal, capped for wide monitors; explicit drags win.
@@ -246,7 +288,9 @@ impl Sidebar {
     /// over the outline or beside it.
     fn pane_areas(&self) -> Option<[Rect; 2]> {
         match self.tab {
-            TabKind::Commits if self.commits.has_files() => self.commit_layout.panes(self.area),
+            TabKind::Commits if self.commits.has_files() => {
+                self.commit_layout.panes(self.area, self.below)
+            }
             TabKind::Files if self.outline.shown() => self.outline.panes(self.area),
             _ => None,
         }
@@ -360,7 +404,7 @@ impl Sidebar {
     /// Two columns need the room of two: a narrow panel is widened when the outline moves
     /// beside the tree, never past half the screen, and the separator drags from there.
     fn widen_for_two_columns(&mut self, editor: &mut Editor) {
-        if self.code_hidden() || self.area.width >= BESIDE_WIDTH {
+        if self.below || self.code_hidden() || self.area.width >= BESIDE_WIDTH {
             return;
         }
         let total = self.area.width + editor.tree.area().width;
@@ -1126,10 +1170,11 @@ impl Sidebar {
         Some(EventResult::Consumed(None))
     }
 
+    /// Across the top the rule under the sidebar is its too, to be dragged.
     pub fn contains(&self, row: u16, column: u16) -> bool {
         self.open
             && row >= self.area.y
-            && row < self.area.bottom()
+            && row < self.area.bottom() + u16::from(self.below && !self.code_hidden())
             && column >= self.area.x
             && column < self.area.right()
     }
@@ -1138,7 +1183,13 @@ impl Sidebar {
     /// every motion of the pointer, and a consumed event is a whole screen drawn again.
     pub fn handle_mouse(&mut self, event: &MouseEvent, cx: &mut commands::Context) -> EventResult {
         let editor = &mut cx.editor;
-        let separator = self.area.right().saturating_sub(1);
+        // The separator that drags the sidebar's size: the column at its right, or across
+        // the top the rule under it.
+        let on_separator = if self.below {
+            event.row == self.area.bottom()
+        } else {
+            event.column == self.area.right().saturating_sub(1)
+        };
         let panes = self.pane_areas();
         let rule = self.rule();
         let pointer_selects_pane = matches!(
@@ -1146,7 +1197,7 @@ impl Sidebar {
             MouseEventKind::Down(_) | MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
         );
         let mut pane_changed = false;
-        if pointer_selects_pane && event.column != separator {
+        if pointer_selects_pane && !on_separator {
             if let Some(panes) = panes {
                 for (index, pane) in panes.iter().enumerate() {
                     if in_pane(pane, event) {
@@ -1164,7 +1215,7 @@ impl Sidebar {
             && event.column >= self.sort_columns.0
             && event.column < self.sort_columns.1;
         match event.kind {
-            MouseEventKind::Down(MouseButton::Left) if event.column == separator => {
+            MouseEventKind::Down(MouseButton::Left) if on_separator => {
                 self.resizing = true;
             }
             // The order is written on the rule between the tree and the outline: a click
@@ -1179,11 +1230,25 @@ impl Sidebar {
             }
             MouseEventKind::Drag(MouseButton::Left) if self.resizing_split => {
                 if self.tab == TabKind::Commits {
-                    self.commit_layout.resize_split(self.area, event.row);
+                    self.commit_layout
+                        .resize_split(self.area, event.row, event.column, self.below);
                 } else {
                     self.outline
                         .resize_split(self.area, event.row, event.column);
                 }
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.resizing && self.below => {
+                // The rows above the rule are the sidebar's; the editor's area is what is
+                // under it, which the rule is not part of.
+                let total = if self.code_hidden() {
+                    self.area.height
+                } else {
+                    self.area.height + 1 + editor.tree.area().height
+                };
+                self.code_hidden = false;
+                let most = total.saturating_sub(EDITOR_ROWS).max(MIN_HEIGHT);
+                let wanted = event.row.saturating_sub(self.area.y);
+                self.height = Some(wanted.clamp(MIN_HEIGHT, most));
             }
             MouseEventKind::Drag(MouseButton::Left) if self.resizing => {
                 let total = if self.code_hidden() {
@@ -1205,11 +1270,13 @@ impl Sidebar {
                 let split = self.resizing_split;
                 self.resizing = false;
                 self.resizing_split = false;
-                let result = if self.tab == TabKind::Commits {
+                let result = if self.tab == TabKind::Commits && (split || !self.below) {
                     self.commit_layout.save()
                 } else if split {
                     self.outline.save()
-                } else if let Some(width) = self.width {
+                } else if let (true, Some(height)) = (self.below, self.height) {
+                    panel_width::save(HEIGHT_FILE, height)
+                } else if let (false, Some(width)) = (self.below, self.width) {
                     panel_width::save(WIDTH_FILE, width)
                 } else {
                     Ok(())
@@ -1445,8 +1512,12 @@ impl Sidebar {
         let inactive_style = theme.get("ui.text.inactive");
 
         let content_width = area.width.saturating_sub(1) as usize;
-        for y in area.y..area.bottom() {
-            surface.set_string(area.right() - 1, y, "│", separator_style);
+        // Across the top the rule under the sidebar is the editor's to draw, and the last
+        // column stays clear.
+        if !self.below {
+            for y in area.y..area.bottom() {
+                surface.set_string(area.right() - 1, y, "│", separator_style);
+            }
         }
         // Beside the tree the outline takes the right of the strip's row for its own
         // header, so the tabs and the filter box stop at the rule between them.
@@ -1539,7 +1610,8 @@ impl Sidebar {
                 for x in area.x..area.right().saturating_sub(1) {
                     surface.set_string(x, lower_area.y, "─", separator_style);
                 }
-                surface.set_string(area.right() - 1, lower_area.y, "┤", separator_style);
+                let corner = if self.below { "─" } else { "┤" };
+                surface.set_string(area.right() - 1, lower_area.y, corner, separator_style);
                 area.x + 1
             };
             // The files of a commit need no heading: the commit's own row is above

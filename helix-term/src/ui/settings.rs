@@ -136,6 +136,12 @@ const SETTINGS: &[Setting] = &[
         also: "",
     },
     Setting {
+        label: "The code, with the sidebar on screen",
+        key: "sidebar.code",
+        kind: Kind::Words(&[("beside", "beside it"), ("below", "under it")]),
+        also: "sidebar layout position top bottom right below beside horizontal vertical",
+    },
+    Setting {
         label: "A commit's files",
         key: "sidebar.commit-files",
         kind: Kind::Words(&[("tree", "as a tree"), ("paths", "as paths")]),

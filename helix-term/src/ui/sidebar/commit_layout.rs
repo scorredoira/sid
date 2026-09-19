@@ -81,6 +81,9 @@ pub struct CommitLayout {
     /// Proportion of the usable rows assigned to history, in thousandths. A proportion
     /// follows terminal height changes without stranding a fixed-size pane off screen.
     history_share: u16,
+    /// The columns the history keeps when the panes sit side by side, with the sidebar
+    /// across the top of the screen; thousandths too.
+    history_columns: u16,
 }
 
 impl Default for CommitLayout {
@@ -88,6 +91,7 @@ impl Default for CommitLayout {
         Self {
             width: None,
             history_share: 667,
+            history_columns: 600,
         }
     }
 }
@@ -97,7 +101,7 @@ impl CommitLayout {
         let layout: Option<Self> = panel_width::load_state(STATE_FILE)?;
         let layout = layout.unwrap_or_default();
         anyhow::ensure!(
-            layout.history_share <= 1000,
+            layout.history_share <= 1000 && layout.history_columns <= 1000,
             "invalid commit pane proportion"
         );
         Ok(layout)
@@ -113,12 +117,23 @@ impl CommitLayout {
             .max(super::MIN_WIDTH)
     }
 
-    pub fn panes(&self, area: Rect) -> Option<[Rect; 2]> {
-        stacked_panes(area, self.history_share)
+    /// The history over the files, or with `side` the files beside the history.
+    pub fn panes(&self, area: Rect, side: bool) -> Option<[Rect; 2]> {
+        if side {
+            side_panes(area, self.history_columns)
+        } else {
+            stacked_panes(area, self.history_share)
+        }
     }
 
-    pub fn resize_split(&mut self, area: Rect, row: u16) {
-        if let Some(share) = share_at(area, row) {
+    /// Drags the rule between the panes to the pointer: the row it is on when they are
+    /// stacked, the column when they sit side by side.
+    pub fn resize_split(&mut self, area: Rect, row: u16, column: u16, side: bool) {
+        if side {
+            if let Some(share) = share_at_column(area, column) {
+                self.history_columns = share;
+            }
+        } else if let Some(share) = share_at(area, row) {
             self.history_share = share;
         }
     }
@@ -141,34 +156,41 @@ mod tests {
     fn stacked_panes_cover_the_area_and_keep_their_minimum_when_dragged() {
         let mut layout = CommitLayout::default();
         let area = Rect::new(4, 5, 80, 41);
-        let [top, bottom] = layout.panes(area).unwrap();
+        let [top, bottom] = layout.panes(area, false).unwrap();
         assert_eq!(top.height - 1, 26);
         assert_eq!(bottom.height - 1, 13);
         assert_eq!(top.bottom(), bottom.y);
         assert_eq!(bottom.bottom(), area.bottom());
-        layout.resize_split(area, 22);
-        assert_eq!(layout.panes(area).unwrap()[1].y, 22);
-        layout.resize_split(area, 0);
-        assert_eq!(layout.panes(area).unwrap()[0].height - 1, 3);
-        layout.resize_split(area, u16::MAX);
-        assert_eq!(layout.panes(area).unwrap()[1].height - 1, 3);
-        assert!(layout.panes(area.with_height(3)).is_none());
+        layout.resize_split(area, 22, 0, false);
+        assert_eq!(layout.panes(area, false).unwrap()[1].y, 22);
+        layout.resize_split(area, 0, 0, false);
+        assert_eq!(layout.panes(area, false).unwrap()[0].height - 1, 3);
+        layout.resize_split(area, u16::MAX, 0, false);
+        assert_eq!(layout.panes(area, false).unwrap()[1].height - 1, 3);
+        assert!(layout.panes(area.with_height(3), false).is_none());
+        // Side by side the same rule is a column, dragged by its own share.
+        let [history, files] = layout.panes(area, true).unwrap();
+        assert_eq!(history.right(), files.x);
+        assert_eq!(files.right(), area.right());
+        layout.resize_split(area, 0, 30, true);
+        assert_eq!(layout.panes(area, true).unwrap()[1].x, 31);
+        assert_eq!(layout.panes(area, false).unwrap()[1].height - 1, 3);
     }
 
     #[test]
     fn saved_proportion_survives_a_resize_without_consuming_either_pane() {
         let mut layout = CommitLayout::default();
         let area = Rect::new(0, 0, 80, 42);
-        layout.resize_split(area, 21);
+        layout.resize_split(area, 21, 0, false);
         layout.width = Some(65);
         let saved = toml::to_string(&layout).unwrap();
         let restored: CommitLayout = toml::from_str(&saved).unwrap();
         assert_eq!(restored.width(300), 65);
-        let [top, bottom] = restored.panes(area.with_height(82)).unwrap();
+        let [top, bottom] = restored.panes(area.with_height(82), false).unwrap();
         assert_eq!(top.height, bottom.height);
         for height in 4..120 {
             let area = area.with_height(height);
-            let [top, bottom] = restored.panes(area).unwrap();
+            let [top, bottom] = restored.panes(area, false).unwrap();
             assert!(top.height >= 2 && bottom.height >= 2);
             assert_eq!(top.bottom(), bottom.y);
             assert_eq!(bottom.bottom(), area.bottom());

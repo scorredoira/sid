@@ -2428,7 +2428,28 @@ impl Component for EditorView {
         // -1 for commandline and the bufferline's rows
         let mut editor_area = area.clip_bottom(1);
         let code_hidden = self.sidebar.code_hidden();
-        if self.sidebar.open {
+        self.sidebar
+            .place(config.sidebar.code == helix_view::editor::CodePlacement::Below);
+        if self.sidebar.open && self.sidebar.below() {
+            // The sidebar across the top, a rule under it, and the code below the rule.
+            let sidebar_height = if code_hidden {
+                editor_area.height
+            } else {
+                self.sidebar
+                    .height(editor_area.height)
+                    .min(editor_area.height.saturating_sub(sidebar::EDITOR_ROWS + 1))
+            };
+            let sidebar_area = editor_area.with_height(sidebar_height);
+            self.sidebar.render(sidebar_area, surface, cx.editor);
+            if !code_hidden {
+                let rule_style = cx.editor.theme.get("ui.window");
+                let y = sidebar_area.bottom();
+                for x in editor_area.x..editor_area.right() {
+                    surface.set_string(x, y, "─", rule_style);
+                }
+                editor_area = editor_area.clip_top(sidebar_height + 1);
+            }
+        } else if self.sidebar.open {
             let sidebar_width = if code_hidden {
                 area.width
             } else {
@@ -2450,6 +2471,7 @@ impl Component for EditorView {
         };
         let preview_area = editor_area.clip_left(editor_area.width - preview_width);
         editor_area = editor_area.clip_right(preview_width);
+        let bufferline_y = editor_area.y;
         if use_bufferline {
             editor_area = editor_area.clip_top(bufferline_height(&cx.editor.theme));
         }
@@ -2461,7 +2483,7 @@ impl Component for EditorView {
         if use_bufferline && !code_hidden && !welcome {
             let bufferline_area = Rect::new(
                 editor_area.x,
-                area.y,
+                bufferline_y,
                 editor_area.width,
                 bufferline_height(&cx.editor.theme),
             );

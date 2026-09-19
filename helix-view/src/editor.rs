@@ -261,6 +261,9 @@ pub struct SidebarConfig {
     pub width: u16,
     /// How the files of an opened commit are listed. Defaults to a tree.
     pub commit_files: CommitFiles,
+    /// Where the code is put with the sidebar on screen: beside it, or under it with the
+    /// sidebar across the whole width. Defaults to beside.
+    pub code: CodePlacement,
 }
 
 impl Default for SidebarConfig {
@@ -269,8 +272,20 @@ impl Default for SidebarConfig {
             open: true,
             width: 32,
             commit_files: CommitFiles::Tree,
+            code: CodePlacement::Beside,
         }
     }
+}
+
+/// Where the code sits when the sidebar is on screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CodePlacement {
+    /// The sidebar is a column at the left, the code the rest of the width.
+    #[default]
+    Beside,
+    /// The sidebar runs across the top, the code under it, both the whole width.
+    Below,
 }
 
 /// How the files a commit touched are listed under the history.
