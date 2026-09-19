@@ -1021,13 +1021,24 @@ fn format_builtin(editor: &mut Editor) -> anyhow::Result<()> {
     )
     .context(unavailable)?
     .map_err(|err| anyhow!(err))?;
-    if formatted == text {
+    // What was left as written is said, so that a document that comes back the same is
+    // not a formatter that did nothing.
+    let kept = formatted.kept_message();
+    if formatted.text == text {
+        let status = match kept {
+            Some(kept) => format!("Already formatted; {kept}"),
+            None => "Already formatted".to_string(),
+        };
+        editor.set_status(status);
         return Ok(());
     }
-    let transaction = helix_core::diff::compare_ropes(doc.text(), &Rope::from(formatted));
+    let transaction = helix_core::diff::compare_ropes(doc.text(), &Rope::from(formatted.text));
     doc.apply(&transaction, view.id);
     doc.append_changes_to_history(view);
     view.ensure_cursor_in_view(doc, scrolloff);
+    if let Some(kept) = kept {
+        editor.set_status(format!("Formatted; {kept}"));
+    }
     Ok(())
 }
 
