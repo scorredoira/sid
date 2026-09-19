@@ -134,6 +134,10 @@ pub struct Outline {
     filter: Option<String>,
     /// Which definitions are folded, hiding the ones inside them.
     folds: SymbolFolds,
+    /// The definitions the cursor is inside, the outermost first, for the status line;
+    /// worked out again when the cursor or the definitions move.
+    crumbs: Vec<String>,
+    crumbs_at: Option<(Key, usize)>,
 }
 
 /// Which definitions of the outline are folded. Every one opens by default and the ones
@@ -198,7 +202,16 @@ impl Outline {
             current: None,
             filter: None,
             folds: SymbolFolds::default(),
+            crumbs: Vec::new(),
+            crumbs_at: None,
         }
+    }
+
+    /// The definitions the cursor is inside, the outermost first: what the status line
+    /// shows as `Shape › area`. Every definition counts, whatever the outline is
+    /// narrowed to.
+    pub fn current_symbols(&self) -> &[String] {
+        &self.crumbs
     }
 
     /// The definition a row lists, as the outline holds it.
@@ -364,6 +377,18 @@ impl Outline {
             if let Some(index) = current.filter(|_| !keys_here) {
                 self.list.select(index);
             }
+        }
+        // The chain for the status line, from every definition held: the ones that
+        // contain the cursor, in the file's order, which nests them outermost first.
+        let at = self.read_from.map(|read| (read, cursor));
+        if at != self.crumbs_at {
+            self.crumbs_at = at;
+            self.crumbs = self
+                .symbols
+                .iter()
+                .filter(|symbol| symbol.start <= cursor && cursor < symbol.end)
+                .map(|symbol| symbol.name.clone())
+                .collect();
         }
     }
 

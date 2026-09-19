@@ -120,9 +120,11 @@ async fn outline_follows_uncommitted_edits_and_undo() -> anyhow::Result<()> {
     );
     // Laid out here, not from the data directory of whoever runs the tests.
     let mut outline = Outline::with_layout(OutlineLayout::default());
-    // A file just switched to is read right away.
+    // A file just switched to is read right away, and the cursor, at the top, is inside
+    // the definition there: what the status line says.
     outline.sync(&mut app.editor, false);
     assert_eq!(names(&outline), ["alpha"]);
+    assert_eq!(outline.current_symbols(), ["alpha"]);
     let revision = doc_mut!(app.editor).get_current_revision();
     {
         let (view, doc) = current!(app.editor);

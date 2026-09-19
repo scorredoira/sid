@@ -432,8 +432,14 @@ impl EditorView {
             .clip_top(view.area.height.saturating_sub(1))
             .clip_bottom(1); // -1 from bottom to remove commandline
 
-        let mut context =
-            statusline::RenderContext::new(editor, doc, view, is_focused, &self.spinners);
+        let mut context = statusline::RenderContext::new(
+            editor,
+            doc,
+            view,
+            is_focused,
+            &self.spinners,
+            self.sidebar.current_symbols(),
+        );
 
         statusline::render(&mut context, statusline_area, surface);
     }
@@ -2474,6 +2480,7 @@ impl Component for EditorView {
                 .render_full(editor_area, surface, cx.editor);
         } else {
             self.sidebar.follow_diff(cx.editor);
+            self.sidebar.follow_symbols(cx.editor);
             for (view, is_focused) in cx.editor.tree.views() {
                 let doc = cx.editor.document(view.doc).unwrap();
                 self.render_view(cx.editor, doc, view, editor_area, surface, is_focused);

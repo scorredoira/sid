@@ -538,6 +538,23 @@ impl Sidebar {
         self.diff.follow(editor);
     }
 
+    /// Keeps the outline in step with the text for the status line's sake, while the
+    /// outline itself is hidden or the sidebar closed; run before the views are drawn.
+    /// An outline on screen is kept in step by its own render.
+    pub fn follow_symbols(&mut self, editor: &mut Editor) {
+        if self.open && self.outline_visible() {
+            return;
+        }
+        if crate::ui::statusline::shows_current_symbol(editor) {
+            self.outline.sync(editor, false);
+        }
+    }
+
+    /// The definitions the cursor is inside, the outermost first, for the status line.
+    pub fn current_symbols(&self) -> &[String] {
+        self.outline.current_symbols()
+    }
+
     pub fn toggle(&mut self, editor: &mut Editor) {
         self.open = !self.open;
         if self.open {

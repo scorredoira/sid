@@ -16,6 +16,9 @@ pub struct RenderContext<'a> {
     pub view: &'a View,
     pub focused: bool,
     pub spinners: &'a ProgressSpinners,
+    /// The definitions the cursor of the focused view is inside, the outermost first,
+    /// as the sidebar's outline last read them.
+    pub symbols: &'a [String],
     pub parts: RenderBuffer<'a>,
 }
 
@@ -26,6 +29,7 @@ impl<'a> RenderContext<'a> {
         view: &'a View,
         focused: bool,
         spinners: &'a ProgressSpinners,
+        symbols: &'a [String],
     ) -> Self {
         RenderContext {
             editor,
@@ -33,9 +37,20 @@ impl<'a> RenderContext<'a> {
             view,
             focused,
             spinners,
+            symbols,
             parts: RenderBuffer::default(),
         }
     }
+}
+
+/// Whether the status line shows the definition the cursor is inside, so the outline is
+/// kept in step with the text even while it is hidden.
+pub fn shows_current_symbol(editor: &Editor) -> bool {
+    let config = editor.config();
+    let statusline = &config.statusline;
+    let has =
+        |elements: &[StatusLineElementID]| elements.contains(&StatusLineElementID::CurrentSymbol);
+    has(&statusline.left) || has(&statusline.center) || has(&statusline.right)
 }
 
 #[derive(Default)]
@@ -153,6 +168,7 @@ where
         helix_view::editor::StatusLineElement::Register => render_register,
         helix_view::editor::StatusLineElement::CurrentWorkingDirectory => render_cwd,
         helix_view::editor::StatusLineElement::CodeActionHint => render_code_action_hint,
+        helix_view::editor::StatusLineElement::CurrentSymbol => render_current_symbol,
     }
 }
 
@@ -586,4 +602,19 @@ where
     if context.focused && context.doc.code_action_hints(context.view.id) {
         write(context, " ⋮ ".into())
     }
+}
+
+/// Where the cursor is, by definition: `Shape › area`, the outermost first. Only in the
+/// focused view, whose text the outline follows; nothing when the cursor is outside
+/// every definition.
+fn render_current_symbol<'a, F>(context: &mut RenderContext<'a>, write: F)
+where
+    F: Fn(&mut RenderContext<'a>, Span<'a>) + Copy,
+{
+    if !context.focused || context.symbols.is_empty() {
+        return;
+    }
+    let style = context.editor.theme.get("ui.text.inactive");
+    let crumb = format!(" {} ", context.symbols.join(" › "));
+    write(context, Span::styled(crumb, style));
 }

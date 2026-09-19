@@ -722,6 +722,7 @@ impl Default for StatusLineConfig {
                 E::FileName,
                 E::ReadOnlyIndicator,
                 E::FileModificationIndicator,
+                E::CurrentSymbol,
             ],
             center: vec![],
             right: vec![
@@ -828,6 +829,9 @@ pub enum StatusLineElement {
 
     /// The base of current working directory
     CurrentWorkingDirectory,
+
+    /// The definition the cursor is inside, and the ones that hold it: `a › b › c`
+    CurrentSymbol,
 
     /// Indicator for when code actions are available
     CodeActionHint,
