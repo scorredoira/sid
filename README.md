@@ -201,15 +201,16 @@ screen, and it stays where you scrolled it.
 The **Commits** tab lists the history, with the whole width to itself until a
 commit is opened. `sid -c` (or `--commits`) opens the editor on the history
 alone, without the strip of tabs over it, the keys in it; outside a git
-repository it says so and does not start. `Enter` or a double click opens one: the files it touched
-appear under the history, and beside them the code column with the commit's
-message and the diff of every file, each file's diff set apart from the next
-with room between them. The diff then follows whatever the cursor is on in the
-files: a directory, or one file, shown on its own without the message. The keys
-stay in the history, so the arrows go on over the commits and `Enter` or a
-double click on the commit again puts the files and the code away, as `F9`
-does; `Alt-Down` takes the keys into the files and `Alt-Up` brings them back.
-`Esc` closes the commit and leaves the history alone again; `F7` hides or shows
+repository it says so and does not start. `Enter` or a double click opens one:
+the code column comes with the commit's message and the diff of every file,
+each file's diff set apart from the next with room between them, and follows
+the cursor over the history. The keys stay there, so `Enter` or a double click
+again puts the code away. `F9` lists the files the commit touched beside the
+history as well, with the keys in them: the diff then follows whatever the
+cursor is on in the files, a directory, or one file, shown on its own without
+the message; `Alt-Up` brings the keys back to the history and `Alt-Down` takes
+them into the files. `Esc` closes the commit and leaves the history alone
+again; `F7` hides or shows
 the code in between. `/` opens a filter on the top row: the history narrows to
 the commits whose hash starts with what you type (`45f740db8`) or whose subject
 or author contains it, looking through the whole history, not only what is on
@@ -426,8 +427,8 @@ answers no.
 
 ![The question asked before quitting with something unsaved](fork/screenshots/quit.png)
 
-And the editor starts the way you would set it up: long lines wrap,
-indentation guides show, open files are tabs, the cursor is a bar while
+And the editor starts the way you would set it up: long lines run off the
+screen rather than wrap, indentation guides show, open files are tabs, the cursor is a bar while
 typing, the mode colours the status line, the theme follows the terminal's
 light or dark background, the file picker shows ignored files too, and
 completion offers only what the language server suggests.

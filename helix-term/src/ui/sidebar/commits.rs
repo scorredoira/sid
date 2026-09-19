@@ -36,6 +36,9 @@ pub struct CommitsTab {
     history_list: List,
     files_focused: bool,
     files_visible: bool,
+    /// Whether Enter has put the commit's diff on screen; the code column shows for it,
+    /// or for the files pane.
+    code_open: bool,
     /// How the files were laid out the last time the rows were built.
     layout: CommitFiles,
     showing: Showing,
@@ -109,6 +112,7 @@ impl CommitsTab {
             history_list: List::default(),
             files_focused: false,
             files_visible: false,
+            code_open: false,
             layout: CommitFiles::Tree,
             showing: Showing::Repository,
             epoch: 0,
@@ -142,6 +146,25 @@ impl CommitsTab {
 
     pub fn files_visible(&self) -> bool {
         self.files_visible
+    }
+
+    /// Whether the code column is wanted: for a diff Enter asked for, or for the files.
+    pub fn code_open(&self) -> bool {
+        self.code_open || self.files_visible
+    }
+
+    /// Enter on a commit: its diff in the code column, following the cursor over the
+    /// history; Enter again puts the code away, and the files with it if they were shown.
+    fn toggle_code(&mut self, cx: &mut TabContext) {
+        if self.code_open() {
+            self.code_open = false;
+            self.files_visible = false;
+            self.files_focused = false;
+        } else {
+            self.code_open = true;
+            self.follow = true;
+            self.preview(cx);
+        }
     }
 
     /// F9: the files of the commit the history cursor is on, with the keys in them, or
@@ -309,6 +332,7 @@ impl CommitsTab {
         self.filter = None;
         self.whole = None;
         self.files_focused = false;
+        self.code_open = false;
         self.follow = false;
         self.history_list.home();
     }
@@ -485,6 +509,7 @@ impl CommitsTab {
         };
         self.files_focused = false;
         self.files_visible = false;
+        self.code_open = false;
         self.opening = None;
         self.rebuild(cx.editor);
         // The history may have been read again meanwhile, so the commit is found by its hash.
@@ -751,6 +776,10 @@ impl TabView for CommitsTab {
             self.leave_commit(cx);
             return true;
         }
+        if self.code_open {
+            self.code_open = false;
+            return true;
+        }
         if self.showing != Showing::Repository {
             self.set_showing(Showing::Repository);
             self.rebuild(cx.editor);
@@ -766,13 +795,12 @@ impl TabView for CommitsTab {
         };
         let in_history = !self.files_focused;
         match (row, how) {
-            // Enter or a double click on a commit opens the files it touched under the
-            // history, and pressed again closes them: the same pane F9 shows, for the
-            // commit the cursor is on. The keys stay in the history, so the next Enter
-            // is the one that closes, and the arrows go on over the commits; Alt-Down
-            // takes the keys into the files.
+            // Enter or a double click on a commit puts its diff in the code column, and
+            // pressed again takes it away. The keys stay in the history, so the next
+            // Enter is the one that closes, and the arrows go on over the commits; the
+            // files the commit touched are F9's, never shown on their own.
             (Row::Commit(_), Activation::Enter | Activation::Double) if in_history => {
-                self.set_files_visible(cx, !self.files_visible, false);
+                self.toggle_code(cx);
                 Outcome::Stay
             }
             (Row::Commit(row), _) if in_history => {

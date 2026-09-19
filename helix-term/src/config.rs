@@ -274,7 +274,7 @@ mod tests {
     fn with_no_config_file_the_defaults_are_sids() {
         let config = Config::load_test(&over_defaults("").unwrap());
 
-        assert_eq!(config.editor.soft_wrap.enable, Some(true));
+        assert_eq!(config.editor.soft_wrap.enable, Some(false));
         assert!(!config.editor.file_picker.git_ignore);
         assert!(matches!(
             config.editor.bufferline,

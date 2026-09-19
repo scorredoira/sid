@@ -27,7 +27,7 @@ select = "underline"
 render = true
 
 [editor.soft-wrap]
-enable = true
+enable = false
 
 [editor.word-completion]
 enable = false

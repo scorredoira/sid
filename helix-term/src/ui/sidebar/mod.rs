@@ -459,7 +459,7 @@ impl Sidebar {
     /// commit is opened or closed, so F7 still hides or shows the code in between.
     fn settle_code(&mut self) {
         if self.tab == TabKind::Commits {
-            self.code_hidden = !self.commits.files_visible();
+            self.code_hidden = !self.commits.code_open();
         }
     }
 
