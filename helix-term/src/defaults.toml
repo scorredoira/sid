@@ -111,7 +111,9 @@ C-l = "select_all_occurrences"
 # by search and by the terminal's full screen.
 S-F11 = "sidebar_collapse"
 S-F4 = ":buffer-close-all"
-# F5 refreshes what the sidebar shows; Shift-F5 brings sid itself up to date.
+# F5 refreshes what the sidebar shows, wherever the focus is; Shift-F5 brings sid itself
+# up to date.
+F5 = "sidebar_refresh"
 S-F5 = ":check-updates"
 C-O = "lsp_or_syntax_symbol_picker"
 C-t = "lsp_or_syntax_workspace_symbol_picker"

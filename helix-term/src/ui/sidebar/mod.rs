@@ -590,6 +590,27 @@ impl Sidebar {
         self.commits.open_commit(commit, true);
     }
 
+    /// F5, wherever the focus is: whatever the sidebar shows is asked for again — the
+    /// tab on screen, and the outline with the tree. A closed sidebar asks when shown.
+    pub fn refresh(&mut self, editor: &mut Editor) {
+        if !self.open {
+            return;
+        }
+        if self.tab.needs_git() {
+            self.check_git();
+        }
+        let (tab, diff) = self.tab_parts();
+        let mut cx = TabContext { editor, diff };
+        tab.refresh(&mut cx);
+        if self.outline_visible() {
+            let mut cx = TabContext {
+                editor,
+                diff: &mut self.diff,
+            };
+            self.outline.refresh(&mut cx);
+        }
+    }
+
     /// Something on disk changed under `path`, by one of the sidebar's own prompts.
     pub fn disk_changed(&mut self, editor: &mut Editor, path: &Path) {
         self.files.disk_changed(editor, path);
@@ -915,14 +936,6 @@ impl Sidebar {
             }
             (KeyCode::Left, _) => {
                 self.collapse_or_parent(editor);
-            }
-            (KeyCode::F(5), KeyModifiers::NONE) => {
-                if self.tab.needs_git() {
-                    self.check_git();
-                }
-                let (tab, diff) = self.parts();
-                let mut tab_cx = TabContext { editor, diff };
-                tab.refresh(&mut tab_cx);
             }
             (KeyCode::Tab, _) => {
                 self.check_git();

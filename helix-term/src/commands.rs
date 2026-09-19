@@ -425,6 +425,7 @@ impl MappableCommand {
         sidebar_focus, "Focus the sidebar, opening it if closed",
         sidebar_toggle, "Show or hide the sidebar",
         sidebar_collapse, "Collapse every directory of the file tree",
+        sidebar_refresh, "Read again what the sidebar shows: the tree, the changes, the commits, the outline",
         toggle_hidden_files, "Show or hide hidden files in the file tree",
         outline_toggle, "Show or hide the outline of the current file's functions and types, under the file tree",
         outline_sort_toggle, "List the outline by name, or in the order the file defines things",
@@ -4893,6 +4894,13 @@ fn sidebar_toggle(_cx: &mut Context) {
     job::dispatch_blocking(|editor, compositor| {
         let editor_view = compositor.find::<ui::EditorView>().unwrap();
         editor_view.sidebar.toggle(editor);
+    });
+}
+
+fn sidebar_refresh(_cx: &mut Context) {
+    job::dispatch_blocking(|editor, compositor| {
+        let editor_view = compositor.find::<ui::EditorView>().unwrap();
+        editor_view.sidebar.refresh(editor);
     });
 }
 
