@@ -507,6 +507,23 @@ fn named_rows(symbols: &[&Symbol]) -> Vec<Row> {
         .collect()
 }
 
+/// The row of the definition the cursor was on before the rows were laid out again: the
+/// one with its name and kind that starts nearest where it started. Several `impl`
+/// blocks each have a `new`; an edit above them moves every start, and the nearest is
+/// the same one, not the first.
+fn reselect(rows: &[Row], name: &str, kind: &str, start: usize) -> Option<usize> {
+    rows.iter()
+        .enumerate()
+        .filter_map(|(index, row)| match row {
+            Row::Symbol(symbol) if symbol.name == name && symbol.kind == kind => {
+                Some((index, symbol.start.abs_diff(start)))
+            }
+            _ => None,
+        })
+        .min_by_key(|(_, distance)| *distance)
+        .map(|(index, _)| index)
+}
+
 fn symbol_row(symbol: &Symbol, depth: usize) -> SymbolRow {
     SymbolRow {
         name: symbol.name.clone(),
@@ -549,11 +566,11 @@ impl TabView for Outline {
         })
     }
 
-    /// Lays the rows out from the definitions held; the cursor stays on its definition,
-    /// found by name and kind, when the order or the file changed under it.
+    /// Lays the rows out from the definitions held; the cursor stays on its definition
+    /// when the order or the file changed under it.
     fn rebuild(&mut self, _editor: &mut Editor) {
         let selected = match self.rows.get(self.list.cursor) {
-            Some(Row::Symbol(symbol)) => Some((symbol.name.clone(), symbol.kind)),
+            Some(Row::Symbol(symbol)) => Some((symbol.name.clone(), symbol.kind, symbol.start)),
             _ => None,
         };
         let listed: Vec<&Symbol> = self
@@ -567,11 +584,7 @@ impl TabView for Outline {
             nested_rows(&listed)
         };
         self.list.set_len(self.rows.len());
-        let found = selected.and_then(|(name, kind)| {
-            self.rows.iter().position(|row| {
-                matches!(row, Row::Symbol(symbol) if symbol.name == name && symbol.kind == kind)
-            })
-        });
+        let found = selected.and_then(|(name, kind, start)| reselect(&self.rows, &name, kind, start));
         if let Some(index) = found {
             self.list.select(index);
         }
@@ -693,6 +706,21 @@ mod tests {
                 ("main".to_string(), 0),
             ]
         );
+    }
+
+    #[test]
+    fn the_cursor_stays_on_the_nearest_of_several_definitions_with_one_name() {
+        let symbols = vec![
+            symbol("Shape", "class", 0, 100),
+            symbol("new", "method", 10, 40),
+            symbol("Colour", "class", 200, 300),
+            symbol("new", "method", 210, 240),
+        ];
+        let rows = nested_rows(&listed(&symbols));
+        // The second `new` moved down by an edit above it: still the second.
+        assert_eq!(reselect(&rows, "new", "method", 190), Some(3));
+        assert_eq!(reselect(&rows, "new", "method", 12), Some(1));
+        assert_eq!(reselect(&rows, "new", "function", 12), None);
     }
 
     #[test]
