@@ -2190,6 +2190,9 @@ impl Component for EditorView {
         match event {
             Event::Paste(contents) => {
                 cx.editor.registers.clipboard_pasted(contents);
+                if self.markdown_preview.is_full(cx.editor) {
+                    return EventResult::Consumed(None);
+                }
                 self.handle_non_key_input(&mut cx);
                 cx.count = cx.editor.count;
                 commands::paste_bracketed_value(&mut cx, contents.clone());
