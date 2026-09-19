@@ -3784,6 +3784,22 @@ fn palette_commands() -> impl Iterator<Item = MappableCommand> {
         )
 }
 
+/// The keys that run a command, as the keyboard shortcuts screen writes them: one
+/// shortcut's keys with arrows between them, and a space between one shortcut and the
+/// next.
+fn palette_keys(bindings: &[Vec<KeyEvent>]) -> String {
+    bindings
+        .iter()
+        .map(|keys| {
+            keys.iter()
+                .map(|key| crate::ui::shortcuts::key_label(*key))
+                .collect::<Vec<_>>()
+                .join(" → ")
+        })
+        .collect::<Vec<_>>()
+        .join("   ")
+}
+
 fn palette_text(command: &MappableCommand) -> String {
     let name = match command {
         // What it is given is part of what it is: ":toggle-option soft-wrap.enable" is
@@ -5225,44 +5241,32 @@ pub fn command_palette(cx: &mut Context) {
 
             let commands = palette_commands();
 
+            // What a command does and the keys that run it, which is what anybody is here
+            // for. Its name, which is only the word config.toml calls it by, is searched
+            // and not shown: "diff" finds every command about diffs, whatever it is
+            // called, and so does its own name.
+            // The keys first and what they do beside them, as the keyboard shortcuts
+            // screen lays them out: a description is as long as it is, and it is the one
+            // that gives way at the right edge.
             let columns = [
-                ui::PickerColumn::new("name", |item, _| match item {
-                    MappableCommand::Typable { name, .. } => format!(":{name}").into(),
-                    MappableCommand::Static { name, .. } => (*name).into(),
-                    MappableCommand::Macro { .. } => {
-                        unreachable!("macros aren't included in the command palette")
-                    }
-                }),
                 ui::PickerColumn::new(
-                    "bindings",
+                    "shortcut",
                     |item: &MappableCommand, keymap: &crate::keymap::ReverseKeymap| {
                         keymap
                             .get(item.name())
-                            .map(|bindings| {
-                                bindings.iter().fold(String::new(), |mut acc, bind| {
-                                    if !acc.is_empty() {
-                                        acc.push(' ');
-                                    }
-                                    for key in bind {
-                                        acc.push_str(&key.key_sequence_format());
-                                    }
-                                    acc
-                                })
-                            })
+                            .map(|bindings| palette_keys(bindings))
                             .unwrap_or_default()
                             .into()
                     },
                 ),
-                ui::PickerColumn::new("doc", |item: &MappableCommand, _| item.doc().into()),
+                ui::PickerColumn::new("action", |item: &MappableCommand, _| item.doc().into()),
                 ui::PickerColumn::searched_only("text", |item: &MappableCommand, _| {
                     palette_text(item).into()
                 }),
             ];
 
-            // What is typed looks in the name and the description at once: "diff" finds
-            // every command about diffs, whatever it is called.
             let enhanced = cx.editor.keyboard_enhanced;
-            let picker = Picker::new(columns, 3, commands, keymap, move |cx, command, _action| {
+            let picker = Picker::new(columns, 2, commands, keymap, move |cx, command, _action| {
                 let mut ctx = Context {
                     register,
                     count,
