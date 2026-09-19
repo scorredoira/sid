@@ -13,7 +13,7 @@ pub mod word_index;
 
 #[derive(Debug)]
 pub enum AutoSaveEvent {
-    DocumentChanged { save_after: u64 },
+    DocumentChanged { save_after: u64, doc: DocumentId },
     LeftInsertMode,
 }
 

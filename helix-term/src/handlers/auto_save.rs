@@ -1,8 +1,5 @@
 use std::{
-    sync::{
-        atomic::{self, AtomicBool},
-        Arc,
-    },
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -27,13 +24,16 @@ use crate::{
 
 #[derive(Debug)]
 pub(super) struct AutoSaveHandler {
-    save_pending: Arc<AtomicBool>,
+    /// The documents changed since the last delayed save, waiting for it: only those are
+    /// written, not every modified document there is. Shared with the save itself, which
+    /// leaves them in place when it has to wait for the insert session to end.
+    pending: Arc<Mutex<Vec<DocumentId>>>,
 }
 
 impl AutoSaveHandler {
     pub fn new() -> AutoSaveHandler {
         AutoSaveHandler {
-            save_pending: Default::default(),
+            pending: Default::default(),
         }
     }
 }
@@ -47,7 +47,11 @@ impl helix_event::AsyncHook for AutoSaveHandler {
         existing_debounce: Option<tokio::time::Instant>,
     ) -> Option<Instant> {
         match event {
-            Self::Event::DocumentChanged { save_after } => {
+            Self::Event::DocumentChanged { save_after, doc } => {
+                let mut pending = self.pending.lock().unwrap();
+                if !pending.contains(&doc) {
+                    pending.push(doc);
+                }
                 Some(Instant::now() + Duration::from_millis(save_after))
             }
             Self::Event::LeftInsertMode => {
@@ -57,7 +61,7 @@ impl helix_event::AsyncHook for AutoSaveHandler {
                     existing_debounce
                 } else {
                     // Otherwise if there is a save pending, save immediately.
-                    if self.save_pending.load(atomic::Ordering::Relaxed) {
+                    if !self.pending.lock().unwrap().is_empty() {
                         self.finish_debounce();
                     }
                     None
@@ -67,22 +71,22 @@ impl helix_event::AsyncHook for AutoSaveHandler {
     }
 
     fn finish_debounce(&mut self) {
-        let save_pending = self.save_pending.clone();
+        let pending = self.pending.clone();
         job::dispatch_blocking(move |editor, _| {
             if editor.mode() == Mode::Insert && editor.config().default_mode != Mode::Insert {
                 // Modal editing waits for the insert session to finish. In sid's
-                // default mode it never finishes; write_all_impl commits the pending
-                // edits to history before saving, keeping saved revisions accurate.
-                save_pending.store(true, atomic::Ordering::Relaxed);
-            } else {
-                request_auto_save(editor);
-                save_pending.store(false, atomic::Ordering::Relaxed);
+                // default mode it never finishes; write_documents_impl commits the
+                // pending edits to history before saving, keeping saved revisions
+                // accurate.
+                return;
             }
+            let docs: Vec<DocumentId> = std::mem::take(&mut *pending.lock().unwrap());
+            request_auto_save(editor, docs);
         })
     }
 }
 
-fn request_auto_save(editor: &mut Editor) {
+fn request_auto_save(editor: &mut Editor, docs: Vec<DocumentId>) {
     let context = &mut compositor::Context {
         editor,
         scroll: Some(0),
@@ -96,7 +100,7 @@ fn request_auto_save(editor: &mut Editor) {
         code_actions: false,
     };
 
-    if let Err(e) = commands::typed::write_all_impl(context, options) {
+    if let Err(e) = commands::typed::write_documents_impl(context, docs, options) {
         context.editor.set_error(format!("{}", e));
     }
 }
@@ -142,6 +146,7 @@ pub(super) fn register_hooks(handlers: &Handlers) {
                 &tx,
                 AutoSaveEvent::DocumentChanged {
                     save_after: config.auto_save.after_delay.timeout,
+                    doc: event.doc.id(),
                 },
             );
         }

@@ -1272,18 +1272,24 @@ pub fn write_all_impl(
     cx: &mut compositor::Context,
     options: WriteAllOptions,
 ) -> anyhow::Result<()> {
+    let docs: Vec<DocumentId> = cx.editor.documents.keys().cloned().collect();
+    write_documents_impl(cx, docs, options)
+}
+
+/// Writes those of `docs` that are modified and have a file; the rest are left alone.
+pub fn write_documents_impl(
+    cx: &mut compositor::Context,
+    docs: Vec<DocumentId>,
+    options: WriteAllOptions,
+) -> anyhow::Result<()> {
     let mut errors: Vec<&'static str> = Vec::new();
     let config = cx.editor.config();
     let typing = typing(cx.editor);
-    let saves: Vec<_> = cx
-        .editor
-        .documents
-        .keys()
-        .cloned()
-        .collect::<Vec<_>>()
+    let saves: Vec<_> = docs
         .into_iter()
         .filter_map(|id| {
-            let doc = doc!(cx.editor, &id);
+            // A document may have been closed since it was asked for.
+            let doc = cx.editor.document(id)?;
             if !doc.is_modified() {
                 return None;
             }

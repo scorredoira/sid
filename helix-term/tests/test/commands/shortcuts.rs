@@ -400,6 +400,59 @@ async fn delayed_save_keeps_the_blank_lines_the_caret_opened_at_the_end() -> any
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn delayed_save_writes_the_file_that_changed_and_no_other() -> anyhow::Result<()> {
+    let first = helpers::temp_file_with_contents("first\n")?;
+    let second = helpers::temp_file_with_contents("second\n")?;
+    let mut config = helpers::test_config();
+    config.editor.default_mode = Mode::Insert;
+    config.editor.auto_save.after_delay.timeout = 25;
+    config.keys.insert(
+        Mode::Insert,
+        keymap!({"Insert mode" "F10" => command_mode, }),
+    );
+    let mut app = AppBuilder::new()
+        .with_config(config)
+        .with_file(first.path(), None)
+        .build()?;
+    let open_second = format!("<F10>o {}<ret>", second.path().display());
+    test_key_sequences(
+        &mut app,
+        vec![
+            // The first file is changed before delayed saves are on, so it stays
+            // modified; then the second is changed with them on.
+            (Some("x"), None),
+            (
+                Some("<F10>set auto-save.after-delay.enable true<ret>"),
+                None,
+            ),
+            (
+                Some(&open_second),
+                Some(&|app| {
+                    assert_eq!(app.editor.documents().count(), 2);
+                }),
+            ),
+            (
+                Some("y"),
+                Some(&|app| {
+                    assert_eq!(std::fs::read_to_string(second.path()).unwrap(), "ysecond\n");
+                    assert_eq!(std::fs::read_to_string(first.path()).unwrap(), "first\n");
+                    let unsaved: Vec<_> = app
+                        .editor
+                        .documents()
+                        .filter(|doc| doc.is_modified())
+                        .map(|doc| doc.path().unwrap().to_path_buf())
+                        .collect();
+                    assert_eq!(unsaved, vec![first.path().to_path_buf()]);
+                }),
+            ),
+        ],
+        false,
+    )
+    .await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn quitting_writes_every_file_after_confirmation() -> anyhow::Result<()> {
     let mut file = tempfile::NamedTempFile::new()?;
     let mut app = with_shortcuts().with_file(file.path(), None).build()?;
