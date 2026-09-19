@@ -11,8 +11,15 @@ pub struct ParsedReview {
     pub review: Review,
 }
 
+/// The blank lines between one file's diff and the next file's heading, and between a
+/// commit's message and its first file: room enough for the eye to see one file end and
+/// another begin, without a rule to draw.
+pub const FILE_GAP: usize = 2;
+
 impl ParsedReview {
-    /// Keep commit prose out of the patch parser and the historical code sources.
+    /// Keep commit prose out of the patch parser and the historical code sources. The
+    /// message is set apart from the first file by the same blank lines that set the
+    /// files apart from each other; each file's own heading says what follows.
     pub fn prepend_commit(&mut self, text: &str) {
         let mut lines = Vec::new();
         let mut introduction = Review::default();
@@ -20,8 +27,9 @@ impl ParsedReview {
         for line in text.split_terminator('\n') {
             push(&mut lines, &mut introduction, line, LineKind::Context);
         }
-        push(&mut lines, &mut introduction, "", LineKind::Separator);
-        push(&mut lines, &mut introduction, "Diffs", LineKind::Header);
+        for _ in 0..FILE_GAP {
+            push(&mut lines, &mut introduction, "", LineKind::Separator);
+        }
         self.text.insert_str(0, &(lines.join("\n") + "\n"));
         introduction.lines.append(&mut self.review.lines);
         self.review.lines = introduction.lines;
@@ -197,7 +205,9 @@ pub fn parse(patch: &str) -> Answer<ParsedReview> {
                 finish(current, &mut lines, &mut review);
             }
             if !lines.is_empty() {
-                push(&mut lines, &mut review, "", LineKind::Separator);
+                for _ in 0..FILE_GAP {
+                    push(&mut lines, &mut review, "", LineKind::Separator);
+                }
             }
             let (old_path, new_path) = header_paths(paths)?;
             file = Some(File {
@@ -640,7 +650,9 @@ mod tests {
         parsed.prepend_commit(&info);
         assert!(parsed.text.starts_with("Commit\nAutor:"));
         assert!(parsed.text.contains("\nmerge\n"));
-        assert!(parsed.text.contains("\nDiffs\ncafé file.rs\n"));
+        // The message is set apart from the first file by blank lines, no heading between.
+        assert!(parsed.text.contains("\n\n\ncafé file.rs\n"));
+        assert!(!parsed.text.contains("\nDiffs\n"));
         let row = parsed.review.find_anchor(&anchor).unwrap();
         assert_eq!(parsed.text.lines().nth(row), Some("fn first() {}"));
         assert!(parsed.review.lines[..row]
@@ -780,11 +792,11 @@ mod tests {
         let [old, new] = parsed.split();
         assert_eq!(
             old.text,
-            "Commit\nsubject\n\nDiffs\na.txt  ·  added\n\nNo newline at end of file\n"
+            "Commit\nsubject\n\n\na.txt  ·  added\n\nNo newline at end of file\n"
         );
         assert_eq!(
             new.text,
-            "Commit\nsubject\n\nDiffs\na.txt  ·  added\nfirst\nNo newline at end of file\n"
+            "Commit\nsubject\n\n\na.txt  ·  added\nfirst\nNo newline at end of file\n"
         );
     }
 
@@ -818,8 +830,9 @@ mod tests {
             (result.review.lines[1].old, result.review.lines[1].new),
             (None, Some(1))
         );
+        // The second file's code, after the blank lines that set the files apart.
         assert_eq!(
-            (result.review.lines[5].old, result.review.lines[5].new),
+            (result.review.lines[6].old, result.review.lines[6].new),
             (Some(1), None)
         );
         assert_eq!(result.review.sources[1].path, PathBuf::from("new.ts"));
@@ -830,7 +843,7 @@ mod tests {
     fn non_code_changes_are_not_hidden() {
         let patch = "diff --git a/old name b/new name\nsimilarity index 100%\nrename from old name\nrename to new name\ndiff --git a/run b/run\nold mode 100644\nnew mode 100755\ndiff --git a/picture.png b/picture.png\nindex 123..456 100644\nBinary files a/picture.png and b/picture.png differ\n";
         let result = parse(patch).unwrap();
-        assert_eq!(result.text, "old name → new name\n\nrun\nPrevious permissions: 100644\nNew permissions: 100755\n\npicture.png\nBinary file changed\n");
+        assert_eq!(result.text, "old name → new name\n\n\nrun\nPrevious permissions: 100644\nNew permissions: 100755\n\n\npicture.png\nBinary file changed\n");
     }
 
     #[test]
