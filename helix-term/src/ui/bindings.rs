@@ -492,13 +492,17 @@ pub fn restore_all(path: &Path) -> anyhow::Result<()> {
 }
 
 /// Drops an entry and every table left empty above it: taking your last shortcut away
-/// leaves no `[keys.all]` behind to wonder about.
-fn prune(table: &mut toml_edit::Table, names: &[String], last: &str) {
+/// leaves no `[keys.all]` behind to wonder about. A table written on one line, as
+/// `space = { h = "…" }`, is a table like any other here.
+fn prune(table: &mut dyn toml_edit::TableLike, names: &[String], last: &str) {
     let Some((name, rest)) = names.split_first() else {
         table.remove(last);
         return;
     };
-    let Some(child) = table.get_mut(name).and_then(|item| item.as_table_mut()) else {
+    let Some(child) = table
+        .get_mut(name)
+        .and_then(|item| item.as_table_like_mut())
+    else {
         return;
     };
     prune(child, rest, last);
@@ -667,6 +671,32 @@ mod tests {
         erase(&path, both, &keys("F7"), false).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(!written.contains("F7"), "{written}");
+    }
+
+    #[test]
+    fn a_table_written_on_one_line_is_pruned_like_any_other() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "theme = \"github_dark\"\n\n[keys.normal]\nspace = { h = \"file_history\", w = \"goto_word\" }\n",
+        )
+        .unwrap();
+        let normal = Where::Modal {
+            normal: true,
+            select: false,
+        };
+
+        erase(&path, normal, &keys("space h"), false).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(!written.contains("file_history"), "{written}");
+        assert!(written.contains("goto_word"), "{written}");
+
+        // The last one out takes the table with it, and [keys] as well.
+        restore(&path, normal, &keys("space w")).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(!written.contains("keys"), "{written}");
+        assert!(written.contains("theme = \"github_dark\""));
     }
 
     #[test]
