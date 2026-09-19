@@ -28,6 +28,9 @@ pub struct DiffTarget {
     pub source: DiffSource,
     pub pathspecs: Vec<String>,
     pub name: String,
+    /// Whether the commit's message goes above the patch: it does for a commit looked at
+    /// whole, not for one file of it, which is read for its own sake.
+    pub describe: bool,
 }
 
 /// How a target is asked: its patch, with the whole file around the changes or not, one
@@ -112,7 +115,9 @@ impl DiffView {
                 };
                 let mut parsed = review::parse(&patch)?;
                 if let DiffSource::Commit(hash) = &target.source {
-                    parsed.prepend_commit(&git::commit_text(&root, hash)?);
+                    if target.describe {
+                        parsed.prepend_commit(&git::commit_text(&root, hash)?);
+                    }
                 }
                 if !asked.side_by_side {
                     parsed.review.prepare_syntax(&loader);

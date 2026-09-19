@@ -100,6 +100,7 @@ impl ChangesTab {
             pathspecs: Vec::new(),
             name: format!("{name} (changes)"),
             source: DiffSource::WorkingTree(file),
+            describe: false,
         })
     }
 

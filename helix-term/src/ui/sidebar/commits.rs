@@ -549,6 +549,7 @@ impl CommitsTab {
                 source: DiffSource::Commit(commit.hash.clone()),
                 pathspecs,
                 name,
+                describe: true,
             });
         };
         let below_root = |path: &Path| {
@@ -577,10 +578,13 @@ impl CommitsTab {
                 }
             }
         }
+        // The commit's own row is the commit, message and all; a directory or a file of
+        // it is read for itself, its heading naming it.
         Some(DiffTarget {
             source: DiffSource::Commit(opened.commit.hash.clone()),
             pathspecs,
             name,
+            describe: matches!(row, Row::Commit(_)),
         })
     }
 }
