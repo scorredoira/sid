@@ -45,7 +45,9 @@ F4 = "review_context_toggle"
 # key is the one keyboards that have it send.
 "S-F10" = "context_menu"
 menu = "context_menu"
-F6 = "review_commits_toggle"
+# One key for the three things a review is looked at through, with the sidebar left on
+# screen the whole way.
+F6 = "review_cycle"
 F7 = "review_code_toggle"
 F9 = "review_files_toggle"
 "C-," = "settings"

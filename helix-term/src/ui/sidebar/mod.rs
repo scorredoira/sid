@@ -416,6 +416,33 @@ impl Sidebar {
         self.in_git
     }
 
+    /// One key for the three things a review is looked at through: the code, the changes
+    /// and the commits, in that round. The sidebar stays on screen the whole way — going
+    /// back to the code never takes the commits away, it only gives the keys back.
+    pub fn cycle_review(&mut self, editor: &mut Editor) {
+        if !self.git_available(editor) {
+            return;
+        }
+        let in_the_code = !self.open || !self.focused;
+        let next = match (in_the_code, self.tab) {
+            // From the code, the changes; from the changes, the commits.
+            (true, _) | (false, TabKind::Files) => Some(TabKind::Changes),
+            (false, TabKind::Changes) => Some(TabKind::Commits),
+            // And from the commits back to the code, with the sidebar left where it is.
+            (false, TabKind::Commits) => None,
+        };
+        match next {
+            Some(kind) => {
+                self.open = true;
+                self.focused = true;
+                self.code_hidden = false;
+                self.tab = kind;
+                self.came_on_screen(editor);
+            }
+            None => self.focus_code(),
+        }
+    }
+
     pub fn toggle_commits(&mut self, editor: &mut Editor) {
         if !self.showing(TabKind::Commits) && !self.git_available(editor) {
             return;

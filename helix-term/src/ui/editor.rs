@@ -2665,14 +2665,15 @@ fn review_menu_entries(
     let files = view.sidebar.files_visible();
     let mut entries = vec![
         context_menu::Entry::new(
+            // One entry for the round F6 walks; the sidebar itself is closed with Ctrl-b.
             if commits {
-                "Hide commits panel"
+                "Back to the code"
             } else {
-                "Show commits panel"
+                "Changes and commits"
             },
             "F6",
             Box::new(|compositor, cx| {
-                run_command(compositor, cx, MappableCommand::review_commits_toggle)
+                run_command(compositor, cx, MappableCommand::review_cycle)
             }),
         ),
         context_menu::Entry::new(

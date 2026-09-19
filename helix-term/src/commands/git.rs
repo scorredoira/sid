@@ -108,6 +108,13 @@ pub fn blame_line(cx: &mut Context) {
 }
 
 /// Review controls are commands so menus, configured keys and the palette share them.
+pub fn review_cycle(cx: &mut Context) {
+    cx.callback.push(Box::new(|compositor, cx| {
+        let view = compositor.find::<EditorView>().unwrap();
+        view.sidebar.cycle_review(cx.editor);
+    }));
+}
+
 pub fn review_commits_toggle(cx: &mut Context) {
     cx.callback.push(Box::new(|compositor, cx| {
         let view = compositor.find::<EditorView>().unwrap();
