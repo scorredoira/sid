@@ -465,6 +465,13 @@ pub fn change_style(change: Change, theme: &Theme) -> Style {
     }
 }
 
+/// What the file tree says, quietly, of a row git knows about: the letter of a changed
+/// file, or that a directory holds one.
+pub enum Mark<'a> {
+    File(&'a ChangedFile),
+    Dir,
+}
+
 /// Draws a file or a directory: its fold marker and name, indented by depth, and a changed
 /// file's letter in the last columns, clear of the name. In the working tree the letter
 /// sits in git's own column: the left one staged, the right one not.
@@ -475,9 +482,28 @@ pub fn draw_entry(
     open: bool,
     theme: &Theme,
 ) {
+    draw_entry_marked(surface, paint, entry, open, theme, None);
+}
+
+/// The same, with what git says of a row of the tree in the tail: a changed file's
+/// letter, dim, or a dot for a directory holding one, the name's column untouched. A
+/// theme that has `ui.text.directory.changed` colours such a directory with it.
+pub fn draw_entry_marked(
+    surface: &mut Surface,
+    paint: &RowPaint,
+    entry: &Entry,
+    open: bool,
+    theme: &Theme,
+    mark: Option<Mark>,
+) {
     let text_style = theme.get("ui.text");
     let mut style = if entry.is_dir {
-        theme.get("ui.text.directory")
+        match mark {
+            Some(Mark::Dir) => theme
+                .try_get_exact("ui.text.directory.changed")
+                .unwrap_or_else(|| theme.get("ui.text.directory")),
+            _ => theme.get("ui.text.directory"),
+        }
     } else {
         entry
             .change
@@ -500,13 +526,26 @@ pub fn draw_entry(
     let label = format!("{}{}", marker, entry.name);
     let x = paint.line.x + indent as u16;
     let two_columns = entry.staged.is_some() || entry.unstaged.is_some();
-    let letter_room = match (entry.change.is_some(), two_columns) {
+    let letter_room = match (entry.change.is_some() || mark.is_some(), two_columns) {
         (false, _) => 0,
         (true, false) => 3,
         (true, true) => 4,
     };
     let width = (paint.line.width as usize).saturating_sub(indent + letter_room);
     surface.set_string_truncated(x, paint.line.y, &label, width, |_| style, true, false);
+    let right = paint.line.right().saturating_sub(2).max(paint.line.x);
+    if let Some(mark) = mark {
+        let mut dim = theme.get("ui.text.inactive");
+        if let Some(selected) = paint.selected {
+            dim = dim.patch(selected);
+        }
+        let letter = match mark {
+            Mark::File(file) => file.change.letter(),
+            Mark::Dir => "•",
+        };
+        surface.set_string(right, paint.line.y, letter, dim);
+        return;
+    }
     let Some(change) = entry.change else {
         return;
     };
@@ -517,7 +556,6 @@ pub fn draw_entry(
         }
         style
     };
-    let right = paint.line.right().saturating_sub(2).max(paint.line.x);
     let left = right.saturating_sub(1).max(paint.line.x);
     if entry.staged.is_none() && entry.unstaged.is_none() {
         surface.set_string(right, paint.line.y, change.letter(), letter_style(change));

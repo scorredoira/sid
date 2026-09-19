@@ -396,6 +396,12 @@ impl Sidebar {
         self.open && self.tab == kind
     }
 
+    /// Whether git status is wanted every few seconds: for the Changes tab, and for the
+    /// tree, which marks its rows with it, inside a repository.
+    fn wants_status(&self) -> bool {
+        self.in_git && (self.showing(TabKind::Changes) || self.showing(TabKind::Files))
+    }
+
     pub fn code_hidden(&self) -> bool {
         self.showing(TabKind::Commits) && self.code_hidden
     }
@@ -712,6 +718,10 @@ impl Sidebar {
         tab.rebuild(editor);
         let mut cx = TabContext { editor, diff };
         tab.shown(&mut cx);
+        // The tree marks its rows with what git says of them.
+        if self.tab == TabKind::Files && self.in_git {
+            self.changes.ask_if_idle();
+        }
         self.revealed = None;
     }
 
@@ -1579,7 +1589,14 @@ impl Sidebar {
                     Row::Entry(entry) => {
                         let folds = self.tab_view().folds();
                         let open = folds.is_some_and(|folds| folds.is_open(&entry.path));
-                        entries::draw_entry(surface, &paint, entry, open, theme);
+                        // The tree wears what git says of its rows; the other tabs' rows
+                        // say it themselves.
+                        let mark = if self.tab == TabKind::Files && self.in_git {
+                            self.changes.mark(&entry.path, entry.is_dir)
+                        } else {
+                            None
+                        };
+                        entries::draw_entry_marked(surface, &paint, entry, open, theme, mark);
                     }
                     Row::Commit(commit) => commits::draw_commit(surface, &paint, commit, theme),
                     Row::Symbol(symbol) => outline::draw_symbol(surface, &paint, symbol, theme),

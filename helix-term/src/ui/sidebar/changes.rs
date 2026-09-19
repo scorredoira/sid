@@ -1,13 +1,14 @@
 //! The Changes tab: what `git status` names, asked again every few seconds while the tab is
 //! on screen, and what can be done to a file there: staged, unstaged, discarded.
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use helix_view::editor::Action;
 use helix_view::Editor;
 
 use super::diff_view::{DiffSource, DiffTarget};
-use super::entries::{self, Folds, Row};
+use super::entries::{self, Folds, Mark, Row};
 use super::git::{self, Change, ChangedFile};
 use super::list::List;
 use super::tab::{Activation, Message, Outcome, TabContext, TabView};
@@ -24,6 +25,10 @@ pub struct ChangesTab {
     list: List,
     /// What the last `git status` answered, or why it could not.
     answer: Option<git::Answer<Vec<ChangedFile>>>,
+    /// The same answer by path, for the tree to mark its rows with, and the directories
+    /// below the root that hold a changed file.
+    by_path: HashMap<PathBuf, usize>,
+    changed_dirs: HashSet<PathBuf>,
     asking: bool,
     /// Whether an ask came while one was under way, to be asked when that one lands.
     again: bool,
@@ -74,6 +79,8 @@ impl ChangesTab {
             rows: Vec::new(),
             list: List::default(),
             answer: None,
+            by_path: HashMap::new(),
+            changed_dirs: HashSet::new(),
             asking: false,
             again: false,
             armed: false,
@@ -141,10 +148,31 @@ impl ChangesTab {
         super::background(
             move || git::status(&root),
             |sidebar, editor, answer| {
-                let shown = sidebar.showing(TabKind::Changes);
+                let shown = sidebar.wants_status();
                 sidebar.changes.landed(shown, editor, answer);
             },
         );
+    }
+
+    /// Asks git status unless the next ask is already on its way: what the tree does
+    /// when it comes on screen, to mark its rows.
+    pub fn ask_if_idle(&mut self) {
+        if !self.armed {
+            self.ask();
+        }
+    }
+
+    /// What the tree says of `path` beside its name: a changed file's letter, or that a
+    /// directory holds changed files.
+    pub fn mark(&self, path: &Path, is_dir: bool) -> Option<Mark<'_>> {
+        if is_dir {
+            return self.changed_dirs.contains(path).then_some(Mark::Dir);
+        }
+        let Some(Ok(files)) = &self.answer else {
+            return None;
+        };
+        let index = *self.by_path.get(path)?;
+        files.get(index).map(Mark::File)
     }
 
     fn landed(&mut self, shown: bool, editor: &mut Editor, answer: git::Answer<Vec<ChangedFile>>) {
@@ -152,6 +180,7 @@ impl ChangesTab {
         let moved = self.answer.as_ref() != Some(&answer);
         self.answer = Some(answer);
         if moved {
+            self.index_answer();
             let was_empty = self.rows.is_empty();
             self.rebuild(editor);
             // The file being edited goes mid-screen the first time, and when it is another
@@ -167,15 +196,36 @@ impl ChangesTab {
             self.again = false;
             self.ask();
         }
-        // For as long as the tab is on screen, the next ask follows the last answer.
+        // For as long as the tab, or the tree it marks, is on screen, the next ask
+        // follows the last answer.
         if shown && !self.armed {
             self.armed = true;
             super::later(REFRESH, |sidebar, _editor| {
                 sidebar.changes.armed = false;
-                if sidebar.showing(TabKind::Changes) {
+                if sidebar.wants_status() {
                     sidebar.changes.ask();
                 }
             });
+        }
+    }
+
+    /// Lays the answer out by path, and names every directory between the root and a
+    /// changed file, for the tree to find its marks without a search per row.
+    fn index_answer(&mut self) {
+        self.by_path.clear();
+        self.changed_dirs.clear();
+        let Some(Ok(files)) = &self.answer else {
+            return;
+        };
+        for (index, file) in files.iter().enumerate() {
+            self.by_path.insert(file.path.clone(), index);
+            let mut dir = file.path.parent();
+            while let Some(current) = dir.filter(|dir| *dir != self.root) {
+                if !current.starts_with(&self.root) || !self.changed_dirs.insert(current.into()) {
+                    break;
+                }
+                dir = current.parent();
+            }
         }
     }
 
@@ -374,9 +424,7 @@ impl TabView for ChangesTab {
     }
 
     fn shown(&mut self, _cx: &mut TabContext) {
-        if !self.armed {
-            self.ask();
-        }
+        self.ask_if_idle();
     }
 
     fn refresh(&mut self, _cx: &mut TabContext) {
@@ -423,7 +471,34 @@ impl TabView for ChangesTab {
 
 #[cfg(test)]
 mod tests {
-    use super::discard_question;
+    use super::*;
+
+    #[test]
+    fn the_tree_finds_a_changed_file_and_the_directories_above_it() {
+        let root = PathBuf::from("/p");
+        let mut tab = ChangesTab::new(root.clone());
+        tab.answer = Some(Ok(vec![ChangedFile {
+            path: root.join("src/ui/a.rs"),
+            change: Change::Modified,
+            from: None,
+            staged: None,
+            unstaged: Some(Change::Modified),
+        }]));
+        tab.index_answer();
+        assert!(matches!(
+            tab.mark(&root.join("src/ui/a.rs"), false),
+            Some(Mark::File(file)) if file.change == Change::Modified
+        ));
+        assert!(matches!(
+            tab.mark(&root.join("src/ui"), true),
+            Some(Mark::Dir)
+        ));
+        assert!(matches!(tab.mark(&root.join("src"), true), Some(Mark::Dir)));
+        // The root itself, and what holds no change, wear nothing.
+        assert!(tab.mark(&root, true).is_none());
+        assert!(tab.mark(&root.join("docs"), true).is_none());
+        assert!(tab.mark(&root.join("src/b.rs"), false).is_none());
+    }
 
     #[test]
     fn the_question_says_when_unsaved_edits_go_too() {
