@@ -592,6 +592,15 @@ impl Sidebar {
         self.revealed = None;
     }
 
+    /// Starts on the Changes tab, focused, as `--changes` asks: called before the first
+    /// render, which builds the tab and asks git for the list. The caller has checked the
+    /// root is in a repository.
+    pub fn open_changes(&mut self) {
+        self.open = true;
+        self.focused = true;
+        self.tab = TabKind::Changes;
+    }
+
     /// Shows the Files tab, focused, on the file being edited.
     pub fn reveal(&mut self, editor: &mut Editor) {
         let was_showing = self.showing(TabKind::Files);

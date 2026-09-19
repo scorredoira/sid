@@ -57,6 +57,8 @@ FLAGS:
     -h, --help                     Print help information
     --strict                       Bail on error for commands that can fail.
     --tutor                        Load the tutorial
+    --changes                      Open on the Changes tab, what git sees changed; outside a git
+                                   repository the editor says so and does not start
     --health [CATEGORY]            Check for potential errors in editor setup
                                    CATEGORY can be a language or one of 'clipboard', 'languages',
                                    'all-languages' or 'all'. 'languages' is filtered according to
@@ -127,6 +129,16 @@ FLAGS:
         eprintln!("Couldn't determine the current working directory: {err}");
         eprintln!("Check that it still exists, or pass an initial directory with `--working-dir`");
         return Ok(1);
+    }
+
+    // The Changes tab has nothing to show outside a repository, so asked for one the
+    // editor says so here, where the message can be read, instead of opening on the tree.
+    if args.changes {
+        let cwd = helix_stdx::env::current_working_dir();
+        if !helix_term::ui::sidebar::git::inside_repository(&cwd) {
+            eprintln!("{} is not in a git repository", cwd.display());
+            return Ok(1);
+        }
     }
 
     let config = match Config::load_default() {

@@ -12,6 +12,8 @@ pub struct Args {
     pub health: bool,
     pub health_arg: Option<String>,
     pub load_tutor: bool,
+    /// Starts on the sidebar's Changes tab, so the editor opens on what git sees changed.
+    pub changes: bool,
     pub fetch_grammars: bool,
     pub build_grammars: bool,
     pub strict: bool,
@@ -52,6 +54,7 @@ impl Args {
                 "--help" => args.display_help = true,
                 "--strict" => args.strict = true,
                 "--tutor" => args.load_tutor = true,
+                "--changes" => args.changes = true,
                 "--vsplit" => match args.split {
                     Some(_) => anyhow::bail!("can only set a split once of a specific type"),
                     None => args.split = Some(Layout::Vertical),

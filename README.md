@@ -188,7 +188,9 @@ diff on screen or from the list: `Ctrl-Alt-s` stages the hunk under the cursor,
 `Ctrl-Alt-u` takes it out of the index, and `Ctrl-Alt-x` throws it away after
 asking; the right button offers the three on a line of the diff. The right button offers the same on the row it
 lands on. The list is asked of git every couple of seconds while the tab is on
-screen, and it stays where you scrolled it.
+screen, and it stays where you scrolled it. `sid --changes` opens the editor on
+this tab, with the keys in it; outside a git repository it says so and does not
+start.
 
 ![The Changes tab beside the diff of the modified file](fork/screenshots/changes.png)
 

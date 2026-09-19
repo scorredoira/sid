@@ -143,7 +143,10 @@ impl Application {
         // for <space>t; with none, or only a directory, it is the project that opens.
         let names_a_file = args.load_tutor || args.files.keys().any(|path| !path.is_dir());
         let sidebar_open = config.load().editor.sidebar.open && !names_a_file;
-        let sidebar = ui::sidebar::Sidebar::new(helix_loader::find_workspace().0, sidebar_open);
+        let mut sidebar = ui::sidebar::Sidebar::new(helix_loader::find_workspace().0, sidebar_open);
+        if args.changes {
+            sidebar.open_changes();
+        }
         let editor_view = Box::new(ui::EditorView::new(Keymaps::new(keys), sidebar));
         compositor.push(editor_view);
 
