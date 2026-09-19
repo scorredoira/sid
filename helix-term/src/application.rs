@@ -1517,10 +1517,23 @@ impl Application {
     }
 
     /// Puts a pane on screen: a view into the focused one (split off it when `split` says
-    /// so), a container as its first pane and then the rest split from it its way.
+    /// so). Create a container's siblings before expanding their nested splits.
     fn restore_pane(editor: &mut Editor, pane: &crate::session::Pane, split: Option<Layout>) {
         use crate::session::{Pane, Split};
         use helix_view::editor::Action;
+
+        fn first_document(editor: &mut Editor, pane: &Pane) -> Option<helix_view::DocumentId> {
+            match pane {
+                Pane::View { file, .. } if file.is_file() => editor
+                    .open(file, Action::Load)
+                    .map_err(|err| log::info!("Not showing {}: {err}", file.display()))
+                    .ok(),
+                Pane::View { .. } => None,
+                Pane::Split { panes, .. } => {
+                    panes.iter().find_map(|pane| first_document(editor, pane))
+                }
+            }
+        }
 
         match pane {
             Pane::Split { split: own, panes } => {
@@ -1528,9 +1541,27 @@ impl Application {
                     Split::Vertical => Layout::Vertical,
                     Split::Horizontal => Layout::Horizontal,
                 };
-                for (index, pane) in panes.iter().enumerate() {
-                    let how = if index == 0 { split } else { Some(layout) };
-                    Self::restore_pane(editor, pane, how);
+                let mut siblings = Vec::new();
+                for pane in panes {
+                    let Some(doc) = first_document(editor, pane) else {
+                        continue;
+                    };
+                    let how = if siblings.is_empty() {
+                        split
+                    } else {
+                        Some(layout)
+                    };
+                    let action = match how {
+                        None => Action::Replace,
+                        Some(Layout::Vertical) => Action::VerticalSplit,
+                        Some(Layout::Horizontal) => Action::HorizontalSplit,
+                    };
+                    editor.switch(doc, action);
+                    siblings.push((editor.tree.focus, pane));
+                }
+                for (view, pane) in siblings {
+                    editor.focus(view);
+                    Self::restore_pane(editor, pane, None);
                 }
             }
             Pane::View { file, line, column } => {
@@ -1797,5 +1828,84 @@ mod large_file_tests {
         assert_eq!(human_size(512), "512 B");
         assert_eq!(human_size(64 * 1024 * 1024), "64 MB");
         assert_eq!(human_size(1288490188), "1.2 GB");
+    }
+}
+
+#[cfg(all(test, feature = "integration"))]
+mod session_restore_tests {
+    use super::*;
+    use crate::session::{Pane, Split};
+
+    fn split(split: Split, panes: Vec<Pane>) -> Pane {
+        Pane::Split { split, panes }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn restoring_nested_session_panes_preserves_the_layout() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let mut leaves = Vec::new();
+        for (index, name) in ["a", "b", "c", "d"].into_iter().enumerate() {
+            let file = dir.path().join(name);
+            std::fs::write(&file, "first\nsecond line\n")?;
+            leaves.push(Pane::View {
+                file,
+                line: 1,
+                column: index,
+            });
+        }
+        let [a, b, c, d] = <[Pane; 4]>::try_from(leaves).ok().unwrap();
+        let missing = Pane::View {
+            file: dir.path().join("missing"),
+            line: 0,
+            column: 0,
+        };
+        let layouts = [
+            split(
+                Split::Vertical,
+                vec![
+                    split(Split::Horizontal, vec![a.clone(), b.clone()]),
+                    c.clone(),
+                ],
+            ),
+            split(
+                Split::Horizontal,
+                vec![
+                    split(Split::Vertical, vec![a.clone(), b.clone()]),
+                    split(Split::Vertical, vec![c.clone(), d.clone()]),
+                ],
+            ),
+            split(
+                Split::Vertical,
+                vec![
+                    split(Split::Horizontal, vec![a.clone(), b]),
+                    split(Split::Horizontal, vec![c, d]),
+                ],
+            ),
+            split(Split::Horizontal, vec![a.clone(), a]),
+        ];
+        for expected in layouts {
+            let mut config = Config::default();
+            config.editor.restore_session = false;
+            config.editor.sidebar.open = false;
+            config.editor.lsp.enable = false;
+            config.editor.word_completion.enable = false;
+            let loader =
+                syntax::Loader::new(helix_loader::config::default_lang_config().try_into()?)?;
+            let mut app = Application::new(
+                Args::default(),
+                config,
+                loader,
+                helix_loader::workspace_trust::WorkspaceTrust::fully_trusted(),
+            )?;
+            let with_missing = split(
+                Split::Vertical,
+                vec![missing.clone(), expected.clone(), missing.clone()],
+            );
+            Application::restore_pane(&mut app.editor, &with_missing, None);
+            let actual = app.session_pane(&app.editor.tree.panes()).unwrap();
+            assert_eq!(toml::to_string(&actual)?, toml::to_string(&expected)?);
+            assert!(app.close().await.is_empty());
+        }
+        Ok(())
     }
 }
