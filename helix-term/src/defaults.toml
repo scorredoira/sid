@@ -46,8 +46,9 @@ F4 = "review_context_toggle"
 "S-F10" = "context_menu"
 menu = "context_menu"
 # One key for the round: the files, the changes, the commits and back to the code, with
-# the sidebar left on screen the whole way.
+# the sidebar left on screen the whole way; with Shift the same round the other way.
 F6 = "review_cycle"
+S-F6 = "review_cycle_back"
 F7 = "review_code_toggle"
 F9 = "review_files_toggle"
 "C-," = "settings"

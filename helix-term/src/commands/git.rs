@@ -115,6 +115,15 @@ pub fn review_cycle(cx: &mut Context) {
     }));
 }
 
+/// The same round the other way: from the code to the commits, then the changes, the
+/// files, and the code again.
+pub fn review_cycle_back(cx: &mut Context) {
+    cx.callback.push(Box::new(|compositor, cx| {
+        let view = compositor.find::<EditorView>().unwrap();
+        view.sidebar.cycle_review(cx.editor, true);
+    }));
+}
+
 pub fn review_commits_toggle(cx: &mut Context) {
     cx.callback.push(Box::new(|compositor, cx| {
         let view = compositor.find::<EditorView>().unwrap();
