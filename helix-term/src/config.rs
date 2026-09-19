@@ -319,8 +319,10 @@ mod tests {
                 "review_side_by_side_toggle"
             );
             assert_eq!(command_at(&config, mode, &["F6"]), "review_cycle");
-            // The way into modal editing has a key of its own in every mode.
+            // The way into modal editing has a key of its own in every mode, and the key
+            // a terminal without the enhanced keyboard turns it into is the same thing.
             assert_eq!(command_at(&config, mode, &["C-A-m"]), "normal_mode");
+            assert_eq!(command_at(&config, mode, &["A-ret"]), "normal_mode");
             assert_eq!(command_at(&config, mode, &["F7"]), "review_code_toggle");
             assert_eq!(command_at(&config, mode, &["F9"]), "review_files_toggle");
             assert_eq!(command_at(&config, mode, &["C-A-o"]), "outline_toggle");

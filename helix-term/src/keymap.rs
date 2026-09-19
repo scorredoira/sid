@@ -182,13 +182,21 @@ impl<'de> serde::de::Visitor<'de> for KeyTrieVisitor {
 }
 
 /// Whether `key` reaches the editor. Without the enhanced keyboard a terminal sends no Cmd,
-/// and Ctrl-Shift with a letter arrives as Ctrl with it, which is another binding's.
+/// and Ctrl-Shift with a letter arrives as Ctrl with it, which is another binding's. Nor
+/// does it tell Ctrl-m, Ctrl-i and Ctrl-[ from Enter, Tab and Escape: they are the same
+/// bytes, and the terminal sends the byte, so a shortcut on any of them — Ctrl-Alt-m
+/// included, which arrives as Alt-Enter — never fires there.
 pub fn key_reaches(key: &KeyEvent, enhanced: bool) -> bool {
     use helix_view::keyboard::{KeyCode, KeyModifiers};
     if enhanced {
         return true;
     }
     if key.modifiers.contains(KeyModifiers::SUPER) {
+        return false;
+    }
+    if key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('m' | 'i' | '['))
+    {
         return false;
     }
     let letter = matches!(key.code, KeyCode::Char(c) if c.is_alphabetic());
@@ -418,6 +426,20 @@ mod tests {
             "i" => normal_mode,
             "i" => goto_definition,
         });
+    }
+
+    #[test]
+    fn a_terminal_without_the_enhanced_keyboard_cannot_tell_some_keys_apart() {
+        let key = |name: &str| name.parse::<KeyEvent>().unwrap();
+        // Ctrl-m is Enter, Ctrl-i is Tab and Ctrl-[ is Escape: the same bytes.
+        for name in ["C-m", "C-A-m", "C-i", "C-[", "Cmd-s", "C-S"] {
+            assert!(!key_reaches(&key(name), false), "{name}");
+            assert!(key_reaches(&key(name), true), "{name}");
+        }
+        // Alt-Enter is what the terminal turns Ctrl-Alt-m into, and it does arrive.
+        for name in ["A-ret", "C-s", "A-m", "C-A-j", "F1"] {
+            assert!(key_reaches(&key(name), false), "{name}");
+        }
     }
 
     #[test]

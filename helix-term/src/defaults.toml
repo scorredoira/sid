@@ -57,9 +57,13 @@ F9 = "review_files_toggle"
 "C-A-right" = "jump_forward"
 # The way into modal editing, which is otherwise only reachable by name: sid opens where
 # you type, so leaving that has to be asked for, and this is the asking. Ctrl-Alt-m, and
-# Cmd-Alt-m where the terminal sends Cmd.
+# Cmd-Alt-m where the terminal sends Cmd. A terminal without the enhanced keyboard cannot
+# tell Ctrl-m from Enter — they are the same byte — so Ctrl-Alt-m arrives there as
+# Alt-Enter, and Alt-Enter is the same shortcut everywhere so that the hand that learnt
+# it is right in every terminal.
 "C-A-m" = "normal_mode"
 "Cmd-A-m" = "normal_mode"
+"A-ret" = "normal_mode"
 F2 = "rename_symbol"
 F8 = "goto_next_diag"
 F12 = "goto_definition"
