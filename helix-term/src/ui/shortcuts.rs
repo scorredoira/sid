@@ -1738,9 +1738,15 @@ mod tests {
             .is_some_and(|row| row.reachable));
         // Ctrl-Alt-m arrives as Alt-Enter there, and the footer says the one that works.
         assert_eq!(screen.modal_key().as_deref(), Some("Alt+Enter"));
+        // With every key reaching, the shortest of them, and on a Mac the Cmd one.
+        let enhanced = if cfg!(target_os = "macos") {
+            "Alt+Cmd+m"
+        } else {
+            "Alt+Enter"
+        };
         assert_eq!(
             Shortcuts::new(&maps, true).modal_key().as_deref(),
-            Some("Alt+Enter"),
+            Some(enhanced),
             "the shortest of the keys that reach"
         );
     }
