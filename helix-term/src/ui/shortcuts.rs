@@ -47,7 +47,10 @@ impl Row {
         } else {
             place.label().to_string()
         };
-        let search = format!("{scope} {label} {description} {}", runs.text()).to_lowercase();
+        // What is typed looks at the keys and at what they do, never at the column that
+        // says where they work: the tabs are for that, and "modal" should find the way
+        // into modal editing, not every shortcut that already lives there.
+        let search = format!("{label} {description} {}", runs.text()).to_lowercase();
         Self {
             place,
             scope,
