@@ -2661,18 +2661,20 @@ fn review_menu_entries(
     cx: &compositor::Context,
 ) -> Vec<context_menu::Entry> {
     let view = compositor.find::<EditorView>().unwrap();
-    let commits = view.sidebar.showing(sidebar::TabKind::Commits);
+    let next = view.sidebar.review_next(false);
     let hidden = view.sidebar.code_hidden();
     let full = view.sidebar.full_context();
     let beside = view.sidebar.side_by_side();
     let files = view.sidebar.files_visible();
     let mut entries = vec![
         context_menu::Entry::new(
-            // One entry for the round F6 walks; the sidebar itself is closed with Ctrl-b.
-            if commits {
-                "Back to the code"
-            } else {
-                "Files, changes and commits"
+            // One entry for the round F6 walks, naming the stop the key goes to next; the
+            // sidebar itself is closed with Ctrl-b.
+            match next {
+                Some(sidebar::TabKind::Files) => "Go to the files",
+                Some(sidebar::TabKind::Changes) => "Go to the changes",
+                Some(sidebar::TabKind::Commits) => "Go to the commits",
+                None => "Back to the code",
             },
             "F6",
             Box::new(|compositor, cx| run_command(compositor, cx, MappableCommand::review_cycle)),

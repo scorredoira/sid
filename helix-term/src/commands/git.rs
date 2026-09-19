@@ -111,7 +111,7 @@ pub fn blame_line(cx: &mut Context) {
 pub fn review_cycle(cx: &mut Context) {
     cx.callback.push(Box::new(|compositor, cx| {
         let view = compositor.find::<EditorView>().unwrap();
-        view.sidebar.cycle_review(cx.editor);
+        view.sidebar.cycle_review(cx.editor, false);
     }));
 }
 

@@ -416,30 +416,35 @@ impl Sidebar {
         self.in_git
     }
 
-    /// One key for the four places work is looked at from: the files, the changes, the
-    /// commits and the code, in that round. The sidebar stays on screen the whole way —
-    /// coming back to the code never takes a tab away, it only gives the keys back.
-    /// Outside a repository the round is the files and the code, with nothing said about
-    /// the two tabs that have nothing to show.
-    pub fn cycle_review(&mut self, editor: &mut Editor) {
+    /// Where the review round goes next from where the keys are: the tab after the one
+    /// that has them, or the code after the last; from the code, the tab on screen, so a
+    /// key pressed twice goes to a tab and back, or the first tab when the sidebar is
+    /// closed. Backwards it is the same round the other way. `None` is the code. The
+    /// menu names this stop, so what it says is what the key does.
+    pub fn review_next(&self, backwards: bool) -> Option<TabKind> {
+        let tabs: Vec<TabKind> = self.tabs().collect();
+        let showing = self.open.then_some(self.tab);
+        next_stop(&tabs, showing, self.focused, backwards)
+    }
+
+    /// One key for the places work is looked at from: the files, the changes, the commits
+    /// and the code, in that round, or the other way round with `backwards`. The sidebar
+    /// stays on screen the whole way — coming back to the code never takes a tab away, it
+    /// only gives the keys back. Outside a repository the round is the files and the code,
+    /// with nothing said about the two tabs that have nothing to show.
+    pub fn cycle_review(&mut self, editor: &mut Editor, backwards: bool) {
         self.check_git();
-        let in_the_code = !self.open || !self.focused;
-        let next = if in_the_code {
-            Some(TabKind::Files)
-        } else {
-            match self.tab {
-                TabKind::Files => Some(TabKind::Changes),
-                TabKind::Changes => Some(TabKind::Commits),
-                TabKind::Commits => None,
-            }
-        };
-        match next.filter(|kind| self.in_git || !kind.needs_git()) {
+        match self.review_next(backwards) {
             Some(kind) => {
+                let was_showing = self.showing(kind);
                 self.open = true;
                 self.focused = true;
                 self.code_hidden = false;
                 self.tab = kind;
-                self.came_on_screen(editor);
+                // A tab already on screen keeps its rows and its place, as Ctrl-E does.
+                if !was_showing {
+                    self.came_on_screen(editor);
+                }
             }
             None => self.focus_code(),
         }
@@ -1561,6 +1566,33 @@ fn in_pane(pane: &Rect, event: &MouseEvent) -> bool {
         && event.column + 1 < pane.right()
 }
 
+/// The stop after the current one in the review round over `tabs`: see
+/// [`Sidebar::review_next`]. `showing` is the tab on screen, if the sidebar is open, and
+/// `focused` whether the keys are in it.
+fn next_stop(
+    tabs: &[TabKind],
+    showing: Option<TabKind>,
+    focused: bool,
+    backwards: bool,
+) -> Option<TabKind> {
+    let on_screen = showing.filter(|kind| tabs.contains(kind));
+    let Some(current) = on_screen.filter(|_| focused) else {
+        return on_screen.or_else(|| {
+            if backwards {
+                tabs.last().copied()
+            } else {
+                tabs.first().copied()
+            }
+        });
+    };
+    let index = tabs.iter().position(|kind| *kind == current)?;
+    if backwards {
+        index.checked_sub(1).map(|index| tabs[index])
+    } else {
+        tabs.get(index + 1).copied()
+    }
+}
+
 /// Runs `work` off the main thread and hands what it made to the sidebar, on it.
 pub(crate) fn background<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
@@ -1842,5 +1874,28 @@ mod tests {
         assert!(!is_editor_shortcut(key("i")));
         assert!(!is_editor_shortcut(key("ret")));
         assert!(!is_editor_shortcut(key("space")));
+    }
+
+    #[test]
+    fn the_review_round_walks_the_tabs_and_comes_back_to_the_code() {
+        use TabKind::*;
+        let all = [Files, Changes, Commits];
+        // From the code with the sidebar closed the round starts at either end.
+        assert_eq!(next_stop(&all, None, false, false), Some(Files));
+        assert_eq!(next_stop(&all, None, false, true), Some(Commits));
+        // From the code with a tab on screen the key goes to that tab, and back.
+        assert_eq!(next_stop(&all, Some(Commits), false, false), Some(Commits));
+        assert_eq!(next_stop(&all, Some(Commits), false, true), Some(Commits));
+        assert_eq!(next_stop(&all, Some(Commits), true, false), None);
+        // Inside, the round walks on, and the code lies past either end.
+        assert_eq!(next_stop(&all, Some(Files), true, false), Some(Changes));
+        assert_eq!(next_stop(&all, Some(Changes), true, false), Some(Commits));
+        assert_eq!(next_stop(&all, Some(Changes), true, true), Some(Files));
+        assert_eq!(next_stop(&all, Some(Files), true, true), None);
+        // Outside a repository only the tree is in the round.
+        let files = [Files];
+        assert_eq!(next_stop(&files, None, false, true), Some(Files));
+        assert_eq!(next_stop(&files, Some(Files), true, false), None);
+        assert_eq!(next_stop(&files, Some(Commits), false, false), Some(Files));
     }
 }
