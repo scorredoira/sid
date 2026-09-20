@@ -68,7 +68,7 @@ pub fn blame_line(cx: &mut Context) {
         });
         if let Some(last) = same_line {
             match last.blame.commit.clone() {
-                Some(commit) => view.sidebar.open_commit(commit),
+                Some(commit) => view.sidebar.open_commit(cx.editor, commit),
                 None => cx.editor.set_status("Not committed yet"),
             }
             return;

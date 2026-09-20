@@ -58,10 +58,13 @@ pub struct CommitsTab {
     /// Counts the cursor's moves, so the preview waited for is the last move's alone.
     moves: u32,
     opened: Option<OpenCommit>,
+    /// A commit reached through blame, until the user chooses a history row. It may
+    /// not be in the loaded pages or in the currently filtered history.
+    reached: Option<Commit>,
     /// The hash whose files are being asked for.
     opening: Option<String>,
-    /// Whether that open was asked for — F9, Enter, a double click — so its files take the
-    /// keys when they land; following the cursor over the history never moves them.
+    /// Whether F9 asked for the files to take focus when they land; following the
+    /// history cursor never moves focus.
     opening_focus: bool,
     /// What the history is narrowed to while the filter box is open.
     filter: Option<String>,
@@ -123,6 +126,7 @@ impl CommitsTab {
             again: false,
             moves: 0,
             opened: None,
+            reached: None,
             opening: None,
             opening_focus: false,
             filter: None,
@@ -153,6 +157,16 @@ impl CommitsTab {
         self.code_open
     }
 
+    pub fn set_code_open(&mut self, open: bool) {
+        self.code_open = open;
+    }
+
+    fn selected_commit(&self) -> Option<&Commit> {
+        self.reached
+            .as_ref()
+            .or_else(|| self.listed().get(self.history_list.cursor))
+    }
+
     /// Enter on a commit: its diff in the code column, following the cursor over the
     /// history; Enter again puts the code away. The files are a pane of their own,
     /// F9's, and stay as they are.
@@ -162,6 +176,9 @@ impl CommitsTab {
         } else {
             self.code_open = true;
             self.follow = true;
+            if !cx.diff.is_on_screen(cx.editor) {
+                cx.diff.forget();
+            }
             self.preview(cx);
         }
     }
@@ -173,21 +190,20 @@ impl CommitsTab {
         if !self.files_visible {
             self.code_open = true;
         }
-        self.set_files_visible(cx, !self.files_visible, true);
+        self.set_files_visible(cx, !self.files_visible);
     }
 
     /// Shows the files of the commit the history cursor is on, or puts the pane away.
-    /// With `focus` the keys go into the files; without it they stay in the history.
-    fn set_files_visible(&mut self, cx: &mut TabContext, visible: bool, focus: bool) {
+    fn set_files_visible(&mut self, cx: &mut TabContext, visible: bool) {
         self.files_visible = visible;
         self.files_focused = false;
         self.follow = true;
         if self.files_visible {
-            let commit = self.listed().get(self.history_list.cursor).cloned();
+            let commit = self.selected_commit().cloned();
             if let Some(commit) = commit {
-                self.open_commit(commit, focus);
+                self.open_commit(commit, true);
             } else {
-                self.focus_files(focus);
+                self.focus_files(true);
             }
         }
         self.preview(cx);
@@ -205,6 +221,7 @@ impl CommitsTab {
     /// is open, the cursor on the first; `None` closes it and the whole history comes back,
     /// the cursor on the commit it was on when the pages read so far hold it.
     pub fn set_filter(&mut self, editor: &mut Editor, text: Option<String>) {
+        self.reached = None;
         let under_cursor = self
             .listed()
             .get(self.history_list.cursor)
@@ -297,12 +314,24 @@ impl CommitsTab {
         self.ask_page(0);
     }
 
-    /// Opens `commit`, reached from elsewhere — a blamed line — as a click on it would:
-    /// its diff on screen, and the files under the history only if the pane is already
-    /// shown. The pane never comes on its own; Enter or F9 bring it.
-    pub fn open_commit_reached(&mut self, commit: Commit) {
+    /// Blame selects its exact commit even when the history has not loaded it. The
+    /// files pane keeps its visibility; the diff opens immediately.
+    pub fn open_commit_reached(&mut self, cx: &mut TabContext, commit: Commit) {
+        self.code_open = true;
+        self.files_focused = false;
         self.follow = true;
-        self.open_commit(commit, false);
+        self.moves = self.moves.wrapping_add(1);
+        self.opening = None;
+        self.reached = Some(commit.clone());
+        if let Some(index) = self.listed().iter().position(|row| row.hash == commit.hash) {
+            self.history_list.select(index);
+            self.history_list.center();
+        }
+        if self.files_visible {
+            self.open_commit(commit, false);
+        }
+        cx.diff.forget();
+        self.preview(cx);
     }
 
     /// Opens `commit` into its files, the cursor on the file the commit was reached by when
@@ -315,11 +344,15 @@ impl CommitsTab {
         super::background(
             move || git::commit_files(&root, &hash),
             move |sidebar, editor, answer| {
+                let shown = sidebar.showing(TabKind::Commits);
                 let mut cx = TabContext {
                     editor,
                     diff: &mut sidebar.diff,
                 };
                 sidebar.commits.files_landed(&mut cx, commit, answer);
+                if shown {
+                    sidebar.commits.preview(&mut cx);
+                }
             },
         );
     }
@@ -331,6 +364,7 @@ impl CommitsTab {
         self.complete = false;
         self.asking = None;
         self.opened = None;
+        self.reached = None;
         self.opening = None;
         self.filter = None;
         self.whole = None;
@@ -502,7 +536,6 @@ impl CommitsTab {
             entries::reselect(&self.rows, &mut self.list, Some(&target));
             self.list.center();
         }
-        self.preview(cx);
     }
 
     /// Esc: the commit is closed and the history stands alone again, where it was.
@@ -513,6 +546,7 @@ impl CommitsTab {
         self.files_focused = false;
         self.files_visible = false;
         self.code_open = false;
+        self.reached = None;
         self.opening = None;
         self.rebuild(cx.editor);
         // The history may have been read again meanwhile, so the commit is found by its hash.
@@ -529,7 +563,10 @@ impl CommitsTab {
     }
 
     /// Shows the diff of what the cursor is on, if there is one to show.
-    fn preview(&mut self, cx: &mut TabContext) {
+    pub fn preview(&mut self, cx: &mut TabContext) {
+        if !self.code_open {
+            return;
+        }
         if let Some(target) = self.diff_target() {
             let loader = cx.editor.syn_loader.load_full();
             cx.diff.ask(target, loader);
@@ -542,7 +579,7 @@ impl CommitsTab {
         if !self.files_visible || self.files_focused {
             return;
         }
-        let Some(commit) = self.listed().get(self.history_list.cursor).cloned() else {
+        let Some(commit) = self.selected_commit().cloned() else {
             return;
         };
         let shown = self
@@ -561,7 +598,7 @@ impl CommitsTab {
         self.moves = self.moves.wrapping_add(1);
         let move_number = self.moves;
         super::later(PREVIEW_DELAY, move |sidebar, editor| {
-            if sidebar.commits.moves != move_number {
+            if sidebar.commits.moves != move_number || !sidebar.showing(TabKind::Commits) {
                 return;
             }
             let mut cx = TabContext {
@@ -577,16 +614,12 @@ impl CommitsTab {
     /// file's in a file's history); inside a commit, the whole commit on its own row, a
     /// directory's files on a directory, one file on a file.
     fn diff_target(&self) -> Option<DiffTarget> {
-        let row = self.rows().get(self.list().cursor)?;
         let opened = self.opened.as_ref().filter(|_| self.files_focused);
         let Some(opened) = opened else {
-            let Row::Commit(row) = row else {
-                return None;
-            };
             if !self.follow {
                 return None;
             }
-            let commit = self.listed().get(row.index)?;
+            let commit = self.selected_commit()?;
             let (pathspecs, name) = match &commit.file {
                 Some(file) => {
                     let mut pathspecs = vec![git::pathspec(file)];
@@ -605,6 +638,7 @@ impl CommitsTab {
                 describe: true,
             });
         };
+        let row = self.rows().get(self.list().cursor)?;
         let below_root = |path: &Path| {
             let inside = path.strip_prefix(&self.root).unwrap_or(path);
             git::pathspec(&format!("{}{}", opened.prefix, inside.to_string_lossy()))
@@ -695,7 +729,7 @@ impl TabView for CommitsTab {
         Some(Message { text, is_error })
     }
 
-    fn rebuild(&mut self, _editor: &mut Editor) {
+    fn rebuild(&mut self, editor: &mut Editor) {
         let selected = self
             .rows
             .get(self.list.cursor)
@@ -709,7 +743,7 @@ impl TabView for CommitsTab {
                 author_width([&opened.commit]),
                 true,
             )));
-            self.layout = _editor.config().sidebar.commit_files;
+            self.layout = editor.config().sidebar.commit_files;
             match self.layout {
                 CommitFiles::Tree => {
                     entries::list_changed(&self.root, &opened.files, &opened.folds, &mut rows)
@@ -745,7 +779,7 @@ impl TabView for CommitsTab {
     }
 
     fn shown(&mut self, _cx: &mut TabContext) {
-        self.follow = false;
+        self.follow = self.reached.is_some();
         let wants_fresh = self.showing == Showing::Repository && !self.armed;
         if self.log.is_none() || wants_fresh {
             self.ask_page(0);
@@ -768,6 +802,7 @@ impl TabView for CommitsTab {
     fn cursor_moved(&mut self, _cx: &mut TabContext) {
         // Moving through the history is choosing a commit to look at, as a click is.
         if !self.files_focused {
+            self.reached = None;
             self.follow = true;
             self.ask_next_page_if_near_end();
         }
@@ -781,6 +816,7 @@ impl TabView for CommitsTab {
         }
         if self.code_open {
             self.code_open = false;
+            self.reached = None;
             return true;
         }
         if self.showing != Showing::Repository {
@@ -806,10 +842,11 @@ impl TabView for CommitsTab {
                 self.toggle_code(cx);
                 Outcome::Stay
             }
-            (Row::Commit(row), _) if in_history => {
-                if let Some(commit) = self.listed().get(row.index).cloned() {
-                    self.open_commit(commit, false);
-                }
+            (Row::Commit(_), _) if in_history => {
+                self.reached = None;
+                self.follow = true;
+                self.follow_files();
+                self.preview(cx);
                 Outcome::Stay
             }
             // Inside a commit the diff already follows the cursor: a click only moves it,
@@ -819,6 +856,7 @@ impl TabView for CommitsTab {
                 Outcome::Stay
             }
             (_, Activation::Enter | Activation::Double) => {
+                self.code_open = true;
                 cx.diff.forget();
                 self.preview(cx);
                 Outcome::Leave
@@ -965,6 +1003,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn blame_target_does_not_depend_on_loaded_history() {
+        let mut tab = CommitsTab::new(PathBuf::from("/repo"));
+        let commit = Commit {
+            hash: "blamed".into(),
+            short: "blamed".into(),
+            time: 0,
+            date: String::new(),
+            author: String::new(),
+            subject: String::new(),
+            file: None,
+            file_from: None,
+        };
+        tab.reached = Some(commit.clone());
+        tab.follow = true;
+        assert_eq!(
+            tab.diff_target().unwrap().source,
+            DiffSource::Commit("blamed".into())
+        );
+        let mut newest = commit;
+        newest.hash = "newest".into();
+        tab.log = Some(Ok(vec![newest]));
+        assert_eq!(
+            tab.diff_target().unwrap().source,
+            DiffSource::Commit("blamed".into())
+        );
+        tab.reached = None;
+        assert_eq!(
+            tab.diff_target().unwrap().source,
+            DiffSource::Commit("newest".into())
+        );
+    }
+
+    #[test]
     fn panes_keep_independent_positions_and_diff_targets() {
         let mut tab = CommitsTab::new(PathBuf::from("/repo"));
         let commit = Commit {
@@ -983,7 +1054,7 @@ mod tests {
         tab.history_list.set_len(2);
         tab.list.set_len(1);
         tab.history_list.select(1);
-        tab.log = Some(Ok(vec![commit.clone()]));
+        tab.log = Some(Ok(vec![commit.clone(), commit.clone()]));
         tab.opened = Some(OpenCommit {
             commit,
             prefix: String::new(),

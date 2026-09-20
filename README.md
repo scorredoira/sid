@@ -206,11 +206,12 @@ repository it says so and does not start. `Enter` or a double click opens one:
 the code column comes with the commit's message and the diff of every file,
 each file's diff set apart from the next with room between them, and follows
 the cursor over the history. The keys stay there, so `Enter` or a double click
-again puts the code away. `F9` lists the files the commit touched beside the
-history as well, with the keys in them: the diff then follows whatever the
+again puts the code away. `F9` lists the files the commit touched in a pane
+of their own, with the keys in them: the diff then follows whatever the
 cursor is on in the files, a directory, or one file, shown on its own without
 the message; `Alt-Up` brings the keys back to the history and `Alt-Down` takes
-them into the files. `Esc` closes the commit and leaves the history alone
+them into the files. `F9` again hides only the files, leaving the code as it
+is. `Esc` closes the commit and leaves the history alone
 again; `F7` hides or shows
 the code in between. `/` opens a filter on the top row: the history narrows to
 the commits whose hash starts with what you type (`45f740db8`) or whose subject
@@ -218,8 +219,9 @@ or author contains it, looking through the whole history, not only what is on
 screen — `Esc` brings it all back. The files come as a tree, folded like the
 file tree, or one per line with its whole path: the setting **A commit's
 files** (`sidebar.commit-files`, `tree` or `paths`) chooses, and is kept.
-History sits above the changed files in one column; drag the divider to resize either pane, or its outer edge to adjust the
-column width.
+With the code beside the sidebar, history sits above the changed files in
+one column; with the code below, the files sit beside the history. Drag the
+divider to resize either pane, or the outer edge to resize the sidebar.
 
 Diffs show filenames and highlighted code with old/new line numbers. `F4` toggles
 the full historical file around the changes. The right button offers these

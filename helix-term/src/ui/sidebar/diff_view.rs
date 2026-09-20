@@ -65,6 +65,8 @@ pub struct DiffView {
     /// What was last asked for, so the same request is not asked twice, and an answer to
     /// something asked before the cursor moved on is dropped.
     asked: Option<Request>,
+    /// The request actually displayed. A newer request may still be reading git.
+    displayed: Option<Request>,
     full_context: bool,
     side_by_side: bool,
     /// Where both sides were last left scrolled, so the one scrolled since leads the other.
@@ -78,6 +80,7 @@ impl DiffView {
             doc: None,
             new_side: None,
             asked: None,
+            displayed: None,
             full_context: false,
             side_by_side: false,
             scrolled: None,
@@ -149,7 +152,7 @@ impl DiffView {
     pub fn blame_request(&self, editor: &Editor) -> Option<git::BlameRequest> {
         let (view, doc) = current_ref!(editor);
         let review = doc.review.as_ref().filter(|_| self.shows(doc.id()))?;
-        let target = &self.asked.as_ref()?.target;
+        let target = &self.displayed.as_ref()?.target;
         let row = doc
             .selection(view.id)
             .primary()
@@ -183,7 +186,7 @@ impl DiffView {
     pub fn working_hunk(&self, editor: &Editor) -> Option<(git::ChangedFile, HunkAt)> {
         let (view, doc) = current_ref!(editor);
         let review = doc.review.as_ref().filter(|_| self.shows(doc.id()))?;
-        let target = &self.asked.as_ref()?.target;
+        let target = &self.displayed.as_ref()?.target;
         let DiffSource::WorkingTree(file) = &target.source else {
             return None;
         };
@@ -233,9 +236,10 @@ impl DiffView {
             .primary()
             .cursor_line(doc.text().slice(..));
         let anchor = review.anchor(row);
-        let Some(request) = self.asked.take() else {
+        let Some(request) = self.displayed.clone() else {
             return;
         };
+        self.forget();
         change(self);
         let loader = editor.syn_loader.load_full();
         self.ask_at(request.target, loader, anchor);
@@ -258,7 +262,10 @@ impl DiffView {
             return;
         }
         match answer {
-            Ok(shown) => self.show(editor, request.target.name, shown, anchor),
+            Ok(shown) => {
+                self.displayed = Some(request.clone());
+                self.show(editor, request.target.name, shown, anchor);
+            }
             Err(err) => editor.set_error(err),
         }
     }
@@ -479,6 +486,64 @@ fn fill(
 #[cfg(test)]
 mod tests {
     use super::{leading, Scroll};
+
+    #[cfg(feature = "integration")]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn actions_use_the_displayed_diff_while_another_is_pending() {
+        use super::*;
+        let mut app = super::super::tests::test_app();
+        let mut diff = DiffView::new(PathBuf::from("/repo"));
+        let file = git::ChangedFile {
+            path: PathBuf::from("/repo/a"),
+            change: git::Change::Modified,
+            from: None,
+            staged: None,
+            unstaged: Some(git::Change::Modified),
+        };
+        let displayed = Request {
+            target: DiffTarget {
+                source: DiffSource::WorkingTree(file.clone()),
+                pathspecs: vec![],
+                name: "a".into(),
+                describe: false,
+            },
+            full_context: false,
+            side_by_side: false,
+        };
+        diff.asked = Some(displayed.clone());
+        let parsed =
+            review::parse("diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+new\n")
+                .unwrap();
+        let row = parsed
+            .review
+            .lines
+            .iter()
+            .position(|line| line.new == Some(1))
+            .unwrap();
+        diff.landed(
+            &mut app.editor,
+            displayed.clone(),
+            None,
+            Ok(Shown::Stacked(parsed)),
+        );
+        let (view, doc) = current!(app.editor);
+        doc.set_selection(view.id, Selection::point(doc.text().line_to_char(row)));
+        let mut pending = displayed;
+        let DiffSource::WorkingTree(file) = &mut pending.target.source else {
+            unreachable!()
+        };
+        file.path = PathBuf::from("/repo/b");
+        diff.asked = Some(pending);
+        assert_eq!(
+            diff.working_hunk(&app.editor).unwrap().0.path,
+            PathBuf::from("/repo/a")
+        );
+        assert_eq!(
+            diff.blame_request(&app.editor).unwrap().path,
+            PathBuf::from("/repo/a")
+        );
+        assert!(app.close().await.is_empty());
+    }
 
     fn at(row: usize) -> Scroll {
         Scroll { row, column: 0 }

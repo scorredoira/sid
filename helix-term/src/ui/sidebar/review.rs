@@ -24,9 +24,9 @@ impl ParsedReview {
         let mut lines = Vec::new();
         let mut introduction = Review::default();
         push(&mut lines, &mut introduction, "Commit", LineKind::Header);
-        for line in text.split_terminator('\n') {
-            let kind = if line.starts_with(super::git::AUTHOR_LABEL)
-                || line.starts_with(super::git::COMMITTER_LABEL)
+        for (index, line) in text.split_terminator('\n').enumerate() {
+            let kind = if (index == 0 && line.starts_with(super::git::AUTHOR_LABEL))
+                || (index == 1 && line.starts_with(super::git::COMMITTER_LABEL))
             {
                 LineKind::Person
             } else {
@@ -436,6 +436,17 @@ fn decode_path(value: &str) -> Answer<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn person_labels_in_the_message_remain_prose() {
+        let mut parsed = parse("").unwrap();
+        parsed.prepend_commit("Autor: A <a@b>\nCommitter: B <b@c>\n\nAutor: quoted message\nCommitter: another quote\n");
+        let kinds: Vec<_> = parsed.review.lines.iter().map(|line| line.kind).collect();
+        assert_eq!(kinds[1], LineKind::Person);
+        assert_eq!(kinds[2], LineKind::Person);
+        assert_eq!(kinds[4], LineKind::Context);
+        assert_eq!(kinds[5], LineKind::Context);
+    }
 
     #[test]
     fn a_row_of_the_diff_knows_its_line_on_both_sides_for_the_hunk_under_it() {

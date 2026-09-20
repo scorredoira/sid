@@ -244,12 +244,12 @@ pub fn commit_files(root: &Path, hash: &str) -> Answer<(String, Vec<ChangedFile>
     Ok((prefix, files))
 }
 
-/// Full commit information, independent of the paths selected for its patch.
 /// How the two people of a commit are labelled over its message; the review buffer
 /// knows the lines by these, to set the names apart.
 pub const AUTHOR_LABEL: &str = "Autor: ";
 pub const COMMITTER_LABEL: &str = "Committer: ";
 
+/// Full commit information, independent of the paths selected for its patch.
 pub fn commit_text(root: &Path, hash: &str) -> Answer<String> {
     let output = run(
         root,
@@ -257,19 +257,18 @@ pub fn commit_text(root: &Path, hash: &str) -> Answer<String> {
             "show",
             "--no-patch",
             "--no-color",
-            "--format=%an <%ae>  %ai%x00%cn <%ce>  %ci%x00%P%x00%B",
+            "--format=%an <%ae>  %ai%x00%cn <%ce>  %ci%x00%B",
             hash,
             "--",
         ],
     )?;
     let output = String::from_utf8_lossy(&output);
-    let fields: Vec<_> = output.splitn(4, '\0').collect();
-    let [author, committer, parents, message] = fields.as_slice() else {
+    let fields: Vec<_> = output.splitn(3, '\0').collect();
+    let [author, committer, message] = fields.as_slice() else {
         return Err("git show: incomplete commit information".into());
     };
     // Who wrote it and who put it in, and nothing else over the message: the parents,
     // the branches and the tags around it were more than anyone read.
-    let _ = parents;
     let mut text = format!("{AUTHOR_LABEL}{author}\n{COMMITTER_LABEL}{committer}\n\n");
     for line in message.split_terminator('\n') {
         text.push_str(line);

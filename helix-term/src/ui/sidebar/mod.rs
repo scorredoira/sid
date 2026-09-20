@@ -126,7 +126,6 @@ pub struct Sidebar {
     diff: DiffView,
     pub open: bool,
     pub focused: bool,
-    code_hidden: bool,
     /// Whether the Commits tab stands alone, without the strip of tabs over it: how
     /// `--commits` opens, until another tab is shown.
     alone: bool,
@@ -237,7 +236,6 @@ impl Sidebar {
             tab: TabKind::Files,
             open,
             focused: false,
-            code_hidden: false,
             alone: false,
             below_setting: false,
             height,
@@ -453,20 +451,17 @@ impl Sidebar {
     }
 
     pub fn code_hidden(&self) -> bool {
-        self.showing(TabKind::Commits) && self.code_hidden
+        self.showing(TabKind::Commits) && !self.commits.code_open()
     }
 
-    /// The Commits tab has the whole width to itself until a commit is opened: the code
-    /// column comes with the commit's files, and goes when they do. Called where a
-    /// commit is opened or closed, so F7 still hides or shows the code in between.
-    fn settle_code(&mut self) {
-        if self.tab == TabKind::Commits {
-            self.code_hidden = !self.commits.code_open();
+    fn show_code(&mut self) {
+        if self.showing(TabKind::Commits) {
+            self.commits.set_code_open(true);
         }
     }
 
     pub fn focus_code(&mut self) {
-        self.code_hidden = false;
+        self.show_code();
         self.focused = false;
     }
 
@@ -483,7 +478,6 @@ impl Sidebar {
         self.in_git = git::inside_repository(&self.root);
         if !self.in_git && self.tab.needs_git() {
             self.tab = TabKind::Files;
-            self.code_hidden = false;
         }
     }
 
@@ -522,7 +516,6 @@ impl Sidebar {
                 let was_showing = self.showing(kind);
                 self.open = true;
                 self.focused = true;
-                self.code_hidden = false;
                 self.tab = kind;
                 // A tab already on screen keeps its rows and its place, as Ctrl-E does.
                 if !was_showing {
@@ -543,7 +536,6 @@ impl Sidebar {
         } else {
             self.open = true;
             self.focused = true;
-            self.code_hidden = false;
             self.tab = TabKind::Commits;
             self.came_on_screen(editor);
         }
@@ -565,7 +557,6 @@ impl Sidebar {
             diff: &mut self.diff,
         };
         self.commits.toggle_files(&mut cx);
-        self.settle_code();
     }
 
     pub fn toggle_code(&mut self, editor: &mut Editor) {
@@ -576,7 +567,13 @@ impl Sidebar {
         if hide && !self.showing(TabKind::Commits) {
             self.toggle_commits(editor);
         }
-        self.code_hidden = hide;
+        self.commits.set_code_open(!hide);
+        if !hide {
+            self.commits.preview(&mut TabContext {
+                editor,
+                diff: &mut self.diff,
+            });
+        }
         self.focused = hide;
     }
 
@@ -626,7 +623,6 @@ impl Sidebar {
         if self.open {
             self.came_on_screen(editor);
         } else {
-            self.code_hidden = false;
             self.focused = false;
         }
     }
@@ -684,7 +680,6 @@ impl Sidebar {
             diff: &mut self.diff,
         };
         self.commits.show_history(&mut cx, path);
-        self.settle_code();
     }
 
     /// Whether the focused view shows an uncommitted diff with the cursor on a line of
@@ -711,13 +706,22 @@ impl Sidebar {
     }
 
     /// Opens `commit` in the Commits tab, focused, its diff on screen.
-    pub fn open_commit(&mut self, commit: Commit) {
+    pub fn open_commit(&mut self, editor: &mut Editor, commit: Commit) {
+        let was_showing = self.showing(TabKind::Commits);
         self.open = true;
         self.focused = true;
         self.tab = TabKind::Commits;
         self.revealed = None;
-        self.commits.open_commit_reached(commit);
-        self.settle_code();
+        if !was_showing {
+            self.came_on_screen(editor);
+        }
+        self.commits.open_commit_reached(
+            &mut TabContext {
+                editor,
+                diff: &mut self.diff,
+            },
+            commit,
+        );
     }
 
     /// F5, wherever the focus is: whatever the sidebar shows is asked for again — the
@@ -793,6 +797,8 @@ impl Sidebar {
 
     /// The tab on screen was just put there: it lays itself out and asks what it asks.
     fn came_on_screen(&mut self, editor: &mut Editor) {
+        // A pending preview from the previous tab must not replace this tab's buffer.
+        self.diff.forget();
         if !self.built {
             // Said from a job of the editor's, not from the render that first needs it.
             later(Duration::ZERO, |sidebar, editor| {
@@ -811,7 +817,6 @@ impl Sidebar {
         if self.tab == TabKind::Files && self.in_git {
             self.changes.ask_if_idle();
         }
-        self.settle_code();
         self.revealed = None;
     }
 
@@ -823,7 +828,6 @@ impl Sidebar {
             tab.step_back(&mut cx);
             return;
         }
-        self.code_hidden = false;
         self.tab = kind;
         self.came_on_screen(editor);
     }
@@ -860,7 +864,6 @@ impl Sidebar {
             // The tab just opened what is now the focused document: nothing to move onto.
             self.revealed = doc!(editor).path().map(Path::to_path_buf);
         }
-        self.settle_code();
         outcome == Outcome::Leave
     }
 
@@ -998,6 +1001,7 @@ impl Sidebar {
             && matches!(key.code, KeyCode::Up | KeyCode::Down)
         {
             self.focus_lower(key.code == KeyCode::Down);
+            self.cursor_moved(cx.editor);
             return EventResult::Consumed(None);
         }
         let editor = &mut cx.editor;
@@ -1007,10 +1011,8 @@ impl Sidebar {
             (KeyCode::Esc, _) => {
                 let (tab, diff) = self.parts();
                 let mut tab_cx = TabContext { editor, diff };
-                if tab.step_back(&mut tab_cx) {
-                    self.settle_code();
-                } else {
-                    self.code_hidden = false;
+                if !tab.step_back(&mut tab_cx) {
+                    self.show_code();
                     self.focused = false;
                 }
             }
@@ -1034,7 +1036,7 @@ impl Sidebar {
             }
             (KeyCode::Enter, _) => {
                 if self.open_row(editor, Activation::Enter) {
-                    self.code_hidden = false;
+                    self.show_code();
                     self.focused = false;
                 }
             }
@@ -1047,7 +1049,7 @@ impl Sidebar {
                 if folds {
                     self.expand_dir(editor);
                 } else if self.open_row(editor, Activation::Enter) {
-                    self.code_hidden = false;
+                    self.show_code();
                     self.focused = false;
                 }
             }
@@ -1152,7 +1154,7 @@ impl Sidebar {
     ) -> Option<EventResult> {
         if (key.code, key.modifiers) == (KeyCode::Char('o'), KeyModifiers::NONE) {
             if self.changes.open_file(cx.editor) {
-                self.code_hidden = false;
+                self.show_code();
                 self.focused = false;
             }
             return Some(EventResult::Consumed(None));
@@ -1251,7 +1253,7 @@ impl Sidebar {
                 } else {
                     self.area.height + 1 + editor.tree.area().height
                 };
-                self.code_hidden = false;
+                self.show_code();
                 let most = total.saturating_sub(EDITOR_ROWS).max(MIN_HEIGHT);
                 let wanted = event.row.saturating_sub(self.area.y);
                 self.height = Some(wanted.clamp(MIN_HEIGHT, most));
@@ -1262,7 +1264,7 @@ impl Sidebar {
                 } else {
                     self.area.width + editor.tree.area().width
                 };
-                self.code_hidden = false;
+                self.show_code();
                 let most = total.saturating_sub(EDITOR_ROOM).max(MIN_WIDTH);
                 let wanted = event.column.saturating_sub(self.area.x).saturating_add(1);
                 let wanted = wanted.clamp(MIN_WIDTH, most);
@@ -2062,6 +2064,95 @@ fn open_changes_menu(row: u16, column: u16, root: PathBuf, file: git::ChangedFil
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "integration")]
+    pub(super) fn test_app() -> crate::application::Application {
+        crate::application::Application::new(
+            crate::args::Args::default(),
+            crate::config::Config::default(),
+            helix_core::syntax::Loader::new(toml::from_str("language = []").unwrap()).unwrap(),
+            helix_loader::workspace_trust::WorkspaceTrust::fully_trusted(),
+        )
+        .unwrap()
+    }
+
+    #[cfg(feature = "integration")]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn commit_visibility_and_blame_follow_user_actions() {
+        let root = tempfile::tempdir().unwrap();
+        for args in [
+            vec!["init"],
+            vec![
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=t@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "older",
+            ],
+            vec![
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=t@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "newer",
+            ],
+        ] {
+            assert!(std::process::Command::new("git")
+                .current_dir(root.path())
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success());
+        }
+        let mut app = test_app();
+        let path = root.path().to_path_buf();
+        crate::job::dispatch(move |editor, compositor| {
+            let sidebar = &mut compositor.find::<editor::EditorView>().unwrap().sidebar;
+            *sidebar = Sidebar::new(path, true);
+            sidebar.open_commits();
+            assert!(sidebar.code_hidden());
+            sidebar.came_on_screen(editor);
+        })
+        .await;
+        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut input = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
+        app.event_loop_until_idle(&mut input).await;
+        let path = root.path().to_path_buf();
+        crate::job::dispatch(move |editor, compositor| {
+            let sidebar = &mut compositor.find::<editor::EditorView>().unwrap().sidebar;
+            assert!(!sidebar.commits.rows().is_empty());
+            sidebar.open_row(editor, Activation::Enter);
+            assert!(!sidebar.code_hidden());
+            sidebar.toggle_code(editor);
+            assert!(sidebar.code_hidden());
+            sidebar.open_row(editor, Activation::Enter);
+            assert!(
+                !sidebar.code_hidden(),
+                "Enter must reopen the diff hidden by F7"
+            );
+            sidebar.toggle_commit_files(editor);
+            sidebar.toggle_commit_files(editor);
+            assert!(!sidebar.files_visible());
+            assert!(!sidebar.code_hidden(), "F9 must leave the code open");
+            sidebar.open_row(editor, Activation::Enter);
+            assert!(sidebar.code_hidden());
+            let older = git::log(&path, 0).unwrap().remove(1);
+            sidebar.open_commit(editor, older);
+            assert!(!sidebar.code_hidden());
+            assert!(!sidebar.files_visible());
+        })
+        .await;
+        app.event_loop_until_idle(&mut input).await;
+        assert!(doc!(app.editor).text().to_string().contains("\nolder\n"));
+        assert!(app.close().await.is_empty());
+    }
 
     fn key(name: &str) -> KeyEvent {
         name.parse().expect("a key of ours")

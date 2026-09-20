@@ -232,7 +232,7 @@ impl Review {
                     for (depth, scope) in scopes.into_iter().enumerate() {
                         if let Some(highlight) = theme.find_highlight(scope) {
                             if layers.len() <= depth {
-                                layers.push(Vec::new());
+                                layers.resize_with(depth + 1, Vec::new);
                             }
                             layers[depth].push((highlight, range.clone()));
                         }
@@ -337,5 +337,39 @@ pub fn line_style(kind: LineKind, theme: &crate::Theme) -> crate::graphics::Styl
                 ..Style::default()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn person_highlights_allow_a_theme_with_bold_but_no_heading() {
+        let theme: crate::Theme =
+            toml::from_str("\"markup.bold\" = { modifiers = [\"bold\"] }").unwrap();
+        let loader = Loader::new(toml::from_str("language = []").unwrap()).unwrap();
+        let text = Rope::from_str("Autor: José <j@example.invalid>  date\n");
+        let review = Review {
+            lines: vec![ReviewLine {
+                kind: LineKind::Person,
+                old: None,
+                new: None,
+                source: None,
+            }],
+            ..Review::default()
+        };
+        let layers = review.highlights(&text, 0..1, &loader, &theme);
+        let names: Vec<_> = layers
+            .iter()
+            .flat_map(|layer| match layer {
+                OverlayHighlights::Heterogenous { highlights } => highlights
+                    .iter()
+                    .map(|(_, range)| text.slice(range.clone()).to_string())
+                    .collect::<Vec<_>>(),
+                _ => vec![],
+            })
+            .collect();
+        assert_eq!(names, ["José"]);
     }
 }
