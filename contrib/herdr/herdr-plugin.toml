@@ -1,0 +1,18 @@
+id = "hx-open"
+name = "Open in Helix"
+version = "0.1.0"
+min_herdr_version = "0.8.0"
+description = "A modified click on a file path opens it, at its line, in the Helix of the same tab"
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "open"
+title = "Open path in Helix"
+contexts = ["pane"]
+command = ["python3", "hx-open.py"]
+
+[[link_handlers]]
+id = "path"
+title = "Open path in Helix"
+pattern = "^(file://.*|([^:]|:[^/]|:/[^/])*)$"
+action = "open"

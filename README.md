@@ -39,6 +39,10 @@ is a newer one, and so does **Check for updates** on the welcome screen
 portable file for servers, other prefixes and building from source are under
 [Installing](#installing).
 
+In Herdr, the [path-click plugin](contrib/herdr/README.md) opens terminal file
+links in sid at the requested line, reusing an editor or starting one in a new
+pane. From a shell, use `sid path/to/file:509` directly.
+
 ## Who it is for
 
 - **People who work in the terminal, or on machines they reach over SSH**, and
