@@ -256,20 +256,45 @@ fn buffer_close(
         return Ok(());
     }
 
-    // Closing the buffer on screen asks about its changes, the way closing them all does.
-    cx.block_try_flush_writes()?;
-    let doc = doc!(cx.editor);
-    if args.is_empty() && doc.is_modified() {
-        ask_about_closing(
-            vec![doc.display_name().to_string()],
-            write_and_close_buffer,
-            |cx| super::run_typable(cx, "buffer-close!"),
-        );
-        return Ok(());
+    if args.is_empty() {
+        return request_buffer_close(cx, doc!(cx.editor).id());
     }
 
     let document_ids = buffer_gather_paths_impl(cx.editor, args);
     buffer_close_by_ids_impl(cx, &document_ids, false)
+}
+
+/// Closing a tab and closing by key ask the same question. Keep the requested document
+/// in the answers: a click can close a tab other than the one currently on screen.
+pub(crate) fn request_buffer_close(
+    cx: &mut compositor::Context,
+    doc_id: DocumentId,
+) -> anyhow::Result<()> {
+    cx.block_try_flush_writes()?;
+    let doc = cx
+        .editor
+        .document(doc_id)
+        .ok_or_else(|| anyhow!("That buffer no longer exists"))?;
+    if doc.is_modified() {
+        ask_about_closing(
+            vec![doc.display_name().to_string()],
+            move |cx| {
+                if cx.editor.document(doc_id).is_some() {
+                    cx.editor.switch(doc_id, Action::Replace);
+                    write_and_close_buffer(cx);
+                }
+            },
+            move |cx| {
+                if let Err(err) = buffer_close_by_ids_impl(cx, &[doc_id], true) {
+                    cx.editor
+                        .set_error(format!("Could not close the buffer: {err}"));
+                }
+            },
+        );
+        return Ok(());
+    }
+
+    buffer_close_by_ids_impl(cx, &[doc_id], false)
 }
 
 fn force_buffer_close(
@@ -404,8 +429,8 @@ fn close_buffer(cx: &mut compositor::Context) {
 /// happens while you look elsewhere.
 fn ask_about_closing(
     modified: Vec<String>,
-    save: fn(&mut compositor::Context),
-    discard: fn(&mut compositor::Context),
+    save: impl FnOnce(&mut compositor::Context) + Send + 'static,
+    discard: impl FnOnce(&mut compositor::Context) + Send + 'static,
 ) {
     let verb = if modified.len() == 1 { "has" } else { "have" };
 

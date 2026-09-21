@@ -390,6 +390,7 @@ mod tests {
             assert_eq!(command_at(&config, mode, &["C-g"]), "goto_line_prompt");
             assert_eq!(command_at(&config, mode, &["C-f"]), "search_in_file");
             assert_eq!(command_at(&config, mode, &["A-z"]), "toggle-option");
+            assert_eq!(command_at(&config, mode, &["C-A-z"]), "toggle-option");
             assert_eq!(
                 command_at(&config, mode, &["C-B"]),
                 "markdown_preview_toggle"

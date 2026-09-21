@@ -381,7 +381,7 @@ So the keys are the ones you already know:
 | `F12` / `Shift-F12` | Go to the definition / to the references |
 | `F2` | Rename the symbol |
 | `F8` | Next diagnostic |
-| `Alt-z` | Wrap long lines, or stop |
+| `Alt-z` / `Ctrl-Alt-z` | Wrap long lines, or stop |
 | `Shift-Alt-f` | Format the file — JSON and XML with nothing installed; it says when nothing needed changing |
 | `Ctrl-Shift-b` | Show or hide the Markdown preview beside the file |
 | `Ctrl-Shift-m` | The Markdown preview on its own, filling the screen |
@@ -392,6 +392,26 @@ A `Cmd` or `Ctrl` key nothing is bound to never types its letter, and on a Mac
 `Cmd-z`, `Cmd-x`, `Cmd-c`, `Cmd-b` and `Cmd-Shift-f` do what their `Ctrl` twins
 do — in the terminals that forward `Cmd` at all, since many keep it for their
 own menus.
+
+If `Option-z` on a Mac types `Ω`, the terminal is sending text instead of
+Alt-z. Use `Ctrl-Option-z` to toggle wrapping, or configure the terminal to
+send Option as Alt/Meta. The command palette (`F1`, search for `wrap`) also
+offers the same setting.
+
+For Ghostty on macOS, this binding in its configuration sends the standard
+Alt-z sequence for that shortcut:
+
+```ini
+keybind = alt+z=esc:z
+```
+
+Reload Ghostty's configuration with `Cmd-Shift-,`. See its
+[keybinding reference](https://ghostty.org/docs/config/keybind) and
+[configuration guide](https://ghostty.org/docs/config#reloading-the-configuration).
+Set this in Ghostty on the Mac, including when sid runs over SSH. sid uses
+the terminal's key events; it cannot recover a shortcut that arrived only
+as an ordinary character. Its commands remain accessible through the palette
+when a terminal keeps or transforms a shortcut.
 
 Where a keyboard puts `/`, `\` or `]` behind another key — a Spanish layout does
 — the editor sees the key that was actually pressed, so `Ctrl-/` is bound to the

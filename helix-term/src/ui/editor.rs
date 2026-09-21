@@ -33,7 +33,7 @@ use helix_lsp::lsp;
 use helix_view::{
     annotations::diagnostics::DiagnosticFilter,
     document::Mode,
-    editor::{CloseError, CompleteAction, CursorShapeConfig},
+    editor::{CompleteAction, CursorShapeConfig},
     graphics::{Color, CursorKind, Margin, Modifier, Rect, Style, UnderlineStyle},
     input::{KeyEvent, MouseButton, MouseEvent, MouseEventKind},
     keyboard::{KeyCode, KeyModifiers},
@@ -937,8 +937,7 @@ impl EditorView {
 
             let is_current = current_doc == doc.id();
 
-            // A modified buffer shows a dot where the cross goes, as it cannot be
-            // closed without losing its changes.
+            // A dot marks unsaved changes; clicking it asks before closing the tab.
             let mark = if doc.is_modified() { "●" } else { "×" };
             tabs.push(TabToDraw {
                 name: format!("  {fname}  "),
@@ -1819,7 +1818,12 @@ impl EditorView {
                     return EventResult::Consumed(None);
                 }
                 Some(BufferlineHit::Close(doc_id)) => {
-                    return close_bufferline_tab(cxt, doc_id);
+                    return EventResult::Consumed(Some(Box::new(move |_, cx| {
+                        if let Err(err) = commands::typed::request_buffer_close(cx, doc_id) {
+                            cx.editor
+                                .set_error(format!("Could not close the buffer: {err}"));
+                        }
+                    })));
                 }
                 None => {}
             }
@@ -2950,72 +2954,6 @@ fn draw_half_block(
                 .set_bg(Color::Reset);
         }
     }
-}
-
-/// Closes the buffer whose cross was clicked, as `:buffer-close` would: one with
-/// unsaved changes stays open and says why.
-fn close_bufferline_tab(cx: &mut commands::Context, doc_id: helix_view::DocumentId) -> EventResult {
-    // A tab with a file behind it is written rather than refused; one without a file is
-    // a question, since closing it is the only way its changes can be lost.
-    match cx.editor.document(doc_id) {
-        Some(doc) if doc.is_modified() && doc.path().is_some() => {
-            if let Err(err) = cx.editor.save::<std::path::PathBuf>(doc_id, None, false) {
-                log::error!("Could not save a buffer before closing it: {err:#}");
-                cx.editor.set_error(format!("Could not save: {err:#}"));
-                return EventResult::Consumed(None);
-            }
-        }
-        Some(doc) if doc.is_modified() => {
-            let name = doc.display_name().to_string();
-            let lines = vec![format!("{name} has changes and no file to write them to.")];
-            let answers = vec![
-                crate::ui::confirm::Answer::new(
-                    "Close without saving",
-                    Box::new(move |cx: &mut crate::compositor::Context| {
-                        if cx.editor.close_document(doc_id, true).is_err() {
-                            log::error!("A buffer the bufferline offered could not be closed");
-                            cx.editor.set_error("That buffer could not be closed");
-                        }
-                    }),
-                )
-                .destructive(),
-                crate::ui::confirm::Answer::new("Cancel", Box::new(|_| {})),
-            ];
-            let dialog = crate::ui::confirm::Confirm::new("Unsaved changes", lines, answers);
-
-            return EventResult::Consumed(Some(Box::new(move |compositor, _| {
-                compositor.push(Box::new(dialog));
-            })));
-        }
-        _ => {}
-    }
-
-    if let Err(err) = cx.block_try_flush_writes() {
-        log::error!("Could not finish pending writes before closing a buffer: {err:#}");
-        cx.editor
-            .set_error(format!("Could not close the buffer: {err:#}"));
-        return EventResult::Consumed(None);
-    }
-
-    match cx.editor.close_document(doc_id, false) {
-        Ok(()) => {}
-        Err(CloseError::BufferModified(name)) => {
-            cx.editor.set_error(format!(
-                "{name} has unsaved changes: write it, or :buffer-close! to drop them"
-            ));
-        }
-        Err(CloseError::DoesNotExist) => {
-            log::error!("The bufferline offered a buffer that no longer exists: {doc_id:?}");
-            cx.editor.set_error("That buffer no longer exists");
-        }
-        Err(CloseError::SaveError(err)) => {
-            log::error!("Could not close a buffer: {err:#}");
-            cx.editor
-                .set_error(format!("Could not close the buffer: {err:#}"));
-        }
-    }
-
-    EventResult::Consumed(None)
 }
 
 /// Runs `work` off the main thread and, when it is done, hands what it made to `land` on
