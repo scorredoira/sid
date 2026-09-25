@@ -11,7 +11,7 @@ use helix_view::graphics::{Modifier, Rect, Style};
 use helix_view::Theme;
 use tui::buffer::Buffer as Surface;
 
-use super::git::{Change, ChangedFile};
+use super::git::{Change, ChangedFile, Lines};
 use super::list::List;
 use crate::ui::{directory_entries_with, explorer_walker};
 
@@ -50,6 +50,8 @@ pub struct Entry {
     /// has neither.
     pub staged: Option<Change>,
     pub unstaged: Option<Change>,
+    /// The lines a changed file gained and lost, shown beside its letter.
+    pub lines: Option<Lines>,
 }
 
 pub struct CommitRow {
@@ -265,6 +267,7 @@ pub fn list_cached(
             change: None,
             staged: None,
             unstaged: None,
+            lines: None,
         }));
         if open {
             list_cached(path, depth + 1, folds, listings, rows, missing);
@@ -405,6 +408,7 @@ pub fn list_paths(root: &Path, files: &[ChangedFile], rows: &mut Vec<Row>) {
             change: Some(file.change),
             staged: file.staged,
             unstaged: file.unstaged,
+            lines: file.lines,
         }));
     }
 }
@@ -439,6 +443,7 @@ fn list_change_dir(dir: &ChangeDir, path: &Path, depth: usize, folds: &Folds, ro
             change: None,
             staged: None,
             unstaged: None,
+            lines: None,
         }));
         if open {
             list_change_dir(child, &child_path, depth + 1, folds, rows);
@@ -453,6 +458,7 @@ fn list_change_dir(dir: &ChangeDir, path: &Path, depth: usize, folds: &Folds, ro
             change: file.map(|file| file.change),
             staged: file.and_then(|file| file.staged),
             unstaged: file.and_then(|file| file.unstaged),
+            lines: file.and_then(|file| file.lines),
         }));
     }
 }
@@ -483,6 +489,9 @@ pub fn change_style(change: Change, theme: &Theme) -> Style {
         Change::Modified | Change::Renamed => theme.get("diff.delta"),
     }
 }
+
+/// The fewest columns a changed file's name keeps before its line counts give way.
+const MIN_NAME: usize = 8;
 
 /// What the file tree says, quietly, of a row git knows about: the letter of a changed
 /// file, or that a directory holds one.
@@ -551,7 +560,30 @@ pub fn draw_entry_marked(
         (true, true) => 4,
     };
     let width = (paint.line.width as usize).saturating_sub(indent + letter_room);
+    // The lines gained and lost stand before the letter, as long as the name keeps room
+    // to be read.
+    let counts = entry
+        .lines
+        .filter(|_| mark.is_none())
+        .map(|lines| (format!("+{}", lines.added), format!("-{}", lines.removed)))
+        .filter(|(added, removed)| width >= added.len() + removed.len() + 2 + MIN_NAME);
+    let width = counts.as_ref().map_or(width, |(added, removed)| {
+        width - added.len() - removed.len() - 2
+    });
     surface.set_string_truncated(x, paint.line.y, &label, width, |_| style, true, false);
+    if let Some((added, removed)) = counts {
+        let tinted = |scope: &str| {
+            let mut style = theme.get(scope);
+            if let Some(selected) = paint.selected {
+                style = style.patch(selected);
+            }
+            style
+        };
+        let end = (x as usize + width + 1) as u16;
+        surface.set_string(end, paint.line.y, &added, tinted("diff.plus"));
+        let end = end + added.len() as u16 + 1;
+        surface.set_string(end, paint.line.y, &removed, tinted("diff.minus"));
+    }
     let right = paint.line.right().saturating_sub(2).max(paint.line.x);
     if let Some(mark) = mark {
         let mut dim = theme.get("ui.text.inactive");
@@ -609,6 +641,7 @@ mod tests {
             change: None,
             staged: None,
             unstaged: None,
+            lines: None,
         })
     }
 

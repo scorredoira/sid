@@ -572,6 +572,7 @@ mod tests {
             from: None,
             staged: None,
             unstaged: Some(Change::Modified),
+            lines: None,
         }]));
         tab.index_answer();
         assert!(matches!(

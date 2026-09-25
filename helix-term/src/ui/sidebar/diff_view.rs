@@ -499,6 +499,7 @@ mod tests {
             from: None,
             staged: None,
             unstaged: Some(git::Change::Modified),
+            lines: None,
         };
         let displayed = Request {
             target: DiffTarget {

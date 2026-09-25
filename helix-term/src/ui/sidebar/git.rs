@@ -78,6 +78,16 @@ pub struct ChangedFile {
     pub staged: Option<Change>,
     /// What is not staged yet, git's second column; nothing for a file in a commit.
     pub unstaged: Option<Change>,
+    /// How many lines it gained and lost: in the working tree against the last commit, in
+    /// a commit against its first parent. None for a binary file, or one not counted.
+    pub lines: Option<Lines>,
+}
+
+/// Lines added and removed, as `--numstat` counts them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Lines {
+    pub added: usize,
+    pub removed: usize,
 }
 
 impl ChangedFile {
@@ -171,7 +181,51 @@ pub fn status(root: &Path) -> Answer<Vec<ChangedFile>> {
         root,
         &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
     )?;
-    parse_status(&status, &prefix, root)
+    let mut files = parse_status(&status, &prefix, root)?;
+    // The same comparison the diff of a file shows: with the last commit, or before the
+    // first one with the index.
+    let base = if run(root, &["rev-parse", "--verify", "--quiet", "HEAD"]).is_ok() {
+        "HEAD"
+    } else {
+        "--cached"
+    };
+    let mut args = vec!["diff", base, "--numstat", "-z", "-M"];
+    args.extend(NUMSTAT_FLAGS);
+    let counts = parse_numstat(&run(root, &args)?, &prefix, root)?;
+    for file in &mut files {
+        file.lines = if file.is_untracked() {
+            count_lines(&file.path)
+        } else {
+            counts.get(&file.path).copied().flatten()
+        };
+    }
+    Ok(files)
+}
+
+/// What keeps `--numstat` counting the lines git stores, whatever the user's settings.
+const NUMSTAT_FLAGS: [&str; 4] = [
+    "--no-color",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--no-relative",
+];
+
+/// How many lines a file git does not know holds, all of them added: none counted for a
+/// binary file, or one too big to read on every refresh.
+fn count_lines(path: &Path) -> Option<Lines> {
+    const MAX: u64 = 4 << 20;
+    if std::fs::metadata(path).ok()?.len() > MAX {
+        return None;
+    }
+    let text = std::fs::read(path).ok()?;
+    if text[..text.len().min(8000)].contains(&0) {
+        return None;
+    }
+    let mut added = text.iter().filter(|byte| **byte == b'\n').count();
+    if text.last().is_some_and(|byte| *byte != b'\n') {
+        added += 1;
+    }
+    Some(Lines { added, removed: 0 })
 }
 
 /// One page of history, newest first, starting `skip` commits down from HEAD.
@@ -240,7 +294,21 @@ pub fn commit_files(root: &Path, hash: &str) -> Answer<(String, Vec<ChangedFile>
             hash,
         ],
     )?;
-    let files = parse_name_status(&listing, &prefix, root)?;
+    let mut files = parse_name_status(&listing, &prefix, root)?;
+    let mut args = vec![
+        "show",
+        "--format=",
+        "--numstat",
+        "-z",
+        "-M",
+        "--diff-merges=first-parent",
+    ];
+    args.extend(NUMSTAT_FLAGS);
+    args.extend([hash, "--"]);
+    let counts = parse_numstat(&run(root, &args)?, &prefix, root)?;
+    for file in &mut files {
+        file.lines = counts.get(&file.path).copied().flatten();
+    }
     Ok((prefix, files))
 }
 
@@ -700,6 +768,7 @@ fn parse_status(status: &[u8], prefix: &str, root: &Path) -> Answer<Vec<ChangedF
             from,
             staged,
             unstaged,
+            lines: None,
         });
     }
     Ok(files)
@@ -796,9 +865,52 @@ fn parse_name_status(listing: &[u8], prefix: &str, root: &Path) -> Answer<Vec<Ch
             from,
             staged: None,
             unstaged: None,
+            lines: None,
         });
     }
     Ok(files)
+}
+
+/// Reads a `--numstat -z` listing into the lines each file gained and lost, by its path
+/// below `root`; a binary file, which git counts with dashes, has none. A rename names
+/// its source and its path after an empty one.
+fn parse_numstat(
+    listing: &[u8],
+    prefix: &str,
+    root: &Path,
+) -> Answer<std::collections::HashMap<PathBuf, Option<Lines>>> {
+    let mut counts = std::collections::HashMap::new();
+    let mut records = listing
+        .split(|byte| *byte == 0)
+        .map(|record| record.strip_prefix(b"\n").unwrap_or(record));
+    while let Some(record) = records.next() {
+        if record.is_empty() {
+            continue;
+        }
+        let record = String::from_utf8_lossy(record);
+        let mut fields = record.splitn(3, '\t');
+        let (Some(added), Some(removed), Some(path)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            return Err(format!("git: unreadable numstat entry {record:?}"));
+        };
+        let path = if path.is_empty() {
+            let (Some(_from), Some(to)) = (records.next(), records.next()) else {
+                return Err("git: a numstat rename without its paths".into());
+            };
+            String::from_utf8_lossy(to).into_owned()
+        } else {
+            path.to_string()
+        };
+        let lines = match (added.parse(), removed.parse()) {
+            (Ok(added), Ok(removed)) => Some(Lines { added, removed }),
+            _ => None,
+        };
+        if let Some(inside) = path.strip_prefix(prefix) {
+            counts.insert(root.join(inside), lines);
+        }
+    }
+    Ok(counts)
 }
 
 /// Reads one line of `git blame --porcelain`: the hash, then headers up to the tab that
@@ -1038,6 +1150,7 @@ mod tests {
                     from: None,
                     staged: None,
                     unstaged: Some(Change::Modified),
+                    lines: None,
                 },
                 ChangedFile {
                     path: root().join("new.txt"),
@@ -1045,6 +1158,7 @@ mod tests {
                     from: None,
                     staged: None,
                     unstaged: Some(Change::Added),
+                    lines: None,
                 },
                 ChangedFile {
                     path: root().join("moved.txt"),
@@ -1052,6 +1166,7 @@ mod tests {
                     from: Some("sub/old.txt".into()),
                     staged: Some(Change::Renamed),
                     unstaged: None,
+                    lines: None,
                 },
             ]
         );
@@ -1126,6 +1241,28 @@ mod tests {
     }
 
     #[test]
+    fn numstat_reads_counts_renames_and_binaries_below_the_root() {
+        let listing = b"25\t0\tsub/a.rs\0\n3\t1\t\0sub/from.rs\0sub/to.rs\0-\t-\tsub/logo.png\0\n1\t1\tother.rs\0";
+        let counts = parse_numstat(listing, "sub/", &root()).unwrap();
+        assert_eq!(counts.len(), 3);
+        assert_eq!(
+            counts[&root().join("a.rs")],
+            Some(Lines {
+                added: 25,
+                removed: 0
+            })
+        );
+        assert_eq!(
+            counts[&root().join("to.rs")],
+            Some(Lines {
+                added: 3,
+                removed: 1
+            })
+        );
+        assert_eq!(counts[&root().join("logo.png")], None);
+    }
+
+    #[test]
     fn a_commit_listing_reads_letters_sources_and_paths() {
         let listing = b"M\0sub/a.rs\0R090\0sub/from.rs\0sub/to.rs\0A\0elsewhere.rs\0";
         let files = parse_name_status(listing, "sub/", &root()).unwrap();
@@ -1138,6 +1275,7 @@ mod tests {
                     from: None,
                     staged: None,
                     unstaged: None,
+                    lines: None,
                 },
                 ChangedFile {
                     path: root().join("to.rs"),
@@ -1145,6 +1283,7 @@ mod tests {
                     from: Some("sub/from.rs".into()),
                     staged: None,
                     unstaged: None,
+                    lines: None,
                 },
             ]
         );
