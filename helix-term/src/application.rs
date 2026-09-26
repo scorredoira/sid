@@ -714,6 +714,8 @@ impl Application {
 
         self.editor
             .set_doc_path(doc_save_event.doc_id, &doc_save_event.path);
+        // Saved under another name, perhaps in a directory not yet watched.
+        crate::handlers::disk_changes::sync(&self.editor);
         // TODO: fix being overwritten by lsp
         self.editor.set_status(format!(
             "'{}' written, {lines}L {size}",

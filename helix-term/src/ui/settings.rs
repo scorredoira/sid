@@ -74,6 +74,12 @@ const SETTINGS: &[Setting] = &[
         also: "",
     },
     Setting {
+        label: "Read a file again when it changes on disk",
+        key: "auto-reload",
+        kind: Kind::Switch,
+        also: "autoreload auto reload watch refresh external changes",
+    },
+    Setting {
         label: "Line numbers",
         key: "line-number",
         kind: Kind::Words(&[("absolute", "absolute"), ("relative", "relative")]),

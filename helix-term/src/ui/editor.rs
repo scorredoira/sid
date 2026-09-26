@@ -2395,6 +2395,8 @@ impl Component for EditorView {
             Event::IdleTimeout => self.handle_idle_timeout(&mut cx),
             Event::FocusGained => {
                 self.terminal_focused = true;
+                // For the file systems that never say a file changed.
+                crate::handlers::disk_changes::look(context.editor);
                 EventResult::Consumed(None)
             }
             Event::FocusLost => {

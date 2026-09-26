@@ -19,6 +19,7 @@ mod auto_save;
 mod code_action_hint;
 pub mod completion;
 pub mod diagnostics;
+pub(crate) mod disk_changes;
 mod document_colors;
 mod document_highlight;
 mod document_links;
@@ -64,5 +65,6 @@ pub fn setup(config: Arc<ArcSwap<Config>>) -> Handlers {
     document_links::register_hooks(&handlers);
     prompt::register_hooks(&handlers);
     workspace_trust::register_hooks(&handlers);
+    disk_changes::register_hooks(&handlers);
     handlers
 }

@@ -14,6 +14,7 @@ use super::list::List;
 use super::tab::{Activation, Message, Outcome, TabContext, TabView};
 use super::{TabKind, REFRESH};
 use crate::commands;
+use crate::handlers::disk_changes;
 use crate::job;
 use crate::ui::confirm::{Answer, Confirm};
 use crate::ui::EditorView;
@@ -266,7 +267,7 @@ impl ChangesTab {
                     if file.is_untracked() {
                         super::files::close_documents_under(editor, &file.path);
                     } else {
-                        reload_document(editor, &file.path);
+                        disk_changes::reload_document(editor, &file.path);
                     }
                 }
                 sidebar.changes.ask();
@@ -353,7 +354,7 @@ pub fn act_on_hunk(sidebar: &mut super::Sidebar, editor: &mut Editor, act: git::
                 Err(err) => editor.set_error(err),
                 Ok(file) => {
                     if act == git::HunkAct::Discard {
-                        reload_document(editor, &file.path);
+                        disk_changes::reload_document(editor, &file.path);
                     }
                     // The reader may have left the diff meanwhile: nothing to read again.
                     if sidebar.diff.is_on_screen(editor) {
@@ -418,47 +419,6 @@ fn discard_question(name: &str, untracked: bool, unsaved: bool) -> Vec<String> {
         lines.push("Unsaved changes to it in the editor will be lost too.".to_string());
     }
     lines
-}
-
-/// Reads the document open on `path` again from disk, the way `:reload` does, after git
-/// changed what is there.
-fn reload_document(editor: &mut Editor, path: &Path) {
-    let Some(doc) = editor.documents().find(|doc| doc.path() == Some(path)) else {
-        return;
-    };
-    let doc_id = doc.id();
-    let trust_full = editor
-        .workspace_trust
-        .query(
-            doc.workspace_root(),
-            helix_loader::workspace_trust::TrustQuery::Git,
-        )
-        .is_trusted();
-    let scrolloff = editor.config().scrolloff;
-    let focused = view!(editor).id;
-    let mut view_ids: Vec<helix_view::ViewId> = doc.selections().keys().cloned().collect();
-    if view_ids.is_empty() {
-        view_ids.push(focused);
-    }
-    let doc = doc_mut!(editor, &doc_id);
-    doc.ensure_view_init(view_ids[0]);
-    let view = view_mut!(editor, view_ids[0]);
-    view.sync_changes(doc);
-    if let Err(err) = doc.reload(view, &editor.diff_providers, trust_full) {
-        editor.set_error(format!("{}: {err}", path.display()));
-        return;
-    }
-    editor
-        .language_servers
-        .file_event_handler
-        .file_changed(path.to_path_buf());
-    for view_id in view_ids {
-        let view = view_mut!(editor, view_id);
-        if view.doc == doc_id {
-            view.sync_changes(doc);
-            view.ensure_cursor_in_view(doc, scrolloff);
-        }
-    }
 }
 
 impl TabView for ChangesTab {

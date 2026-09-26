@@ -1272,6 +1272,15 @@ impl Document {
         }
     }
 
+    /// When the file on disk was last known to hold what this document saved or read.
+    pub fn last_saved_time(&self) -> SystemTime {
+        self.last_saved_time
+    }
+
+    pub fn set_last_saved_time(&mut self, time: SystemTime) {
+        self.last_saved_time = time;
+    }
+
     pub fn pickup_last_saved_time(&mut self) {
         self.last_saved_time = match self.path() {
             Some(path) => match path.metadata() {
